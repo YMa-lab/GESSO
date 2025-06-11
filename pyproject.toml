@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+
+[project]
+name = "splat"
+version = "0.1.0a1"
+description = "Spatial Pathway Level Analysis Tool: spatially informed gene set expression analysis"
+authors = [
+    {name = "Andrew Yang", email = "andrew_j_yang@brown.edu"},
+    {name = "Chichun Tan", email = "chichun_tan@brown.edu"},
+    {name = "Ying Ma", email = "ying_ma@brown.edu"}
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy==2.0.2",
+    "pandas==2.2.2",
+    "scipy==1.15.2",
+    "scikit-learn==1.5.2",
+    "matplotlib==3.10.1",
+    "joblib==1.4.2"
+]
+license = {file = "LICENSE"}
+keywords = ["transcriptomics", "spatial", "pathway", "biostatistics", "statistics"]
+classifiers = [
+    "Programming Language :: Python"
+]
+
+
+
+[project.urls]
+Homepage = "https://github.com/YMa-lab/SPLAGE"
+
+
+
+[tool.hatch.metadata]
+packages = [
+    {include = "splat"}
+]

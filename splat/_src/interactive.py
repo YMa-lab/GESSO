@@ -1,7 +1,6 @@
 import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap, Colormap
+from matplotlib.colors import Colormap
 import pandas as pd
-from pathlib import Path
 
 
 class SplatReport:
@@ -65,116 +64,12 @@ class SplatReport:
         """
         return self._pas_df
 
-    def save_activity_scores_csv(self, path: Path | str):
-        """Saves pathway activity scores DataFrame as a CSV.
-
-        Parameters
-        ----------
-        path : Path | str
-            Pathlike string or Path object.
-        """
-        if isinstance(path, str):
-            try:
-                path = Path(path)
-            except Exception as e:
-                raise ValueError(
-                    f"Could not convert path to Path object. Error: {str(e)}. "
-                    "Please double check the validity of the provided path."
-                )
-        if not path.exists():
-            try:
-                path.mkdir(parents=True)
-            except Exception as e:
-                raise ValueError(
-                    f"Error: {str(e)}. "
-                    "Please double check the validity of the provided path."
-                )
-        self._pas_df.to_csv(path)
-
-    def save_locations_csv(self, path: Path | str):
-        """Saves location DataFrame as a CSV.
-
-        Parameters
-        ----------
-        path : Path | str
-            Pathlike string or Path object.
-        """
-        if isinstance(path, str):
-            try:
-                path = Path(path)
-            except Exception as e:
-                raise ValueError(
-                    f"Could not convert path to Path object. Error: {str(e)}. "
-                    "Please double check the validity of the provided path."
-                )
-        if not path.exists():
-            try:
-                path.mkdir(parents=True)
-            except Exception as e:
-                raise ValueError(
-                    f"Error: {str(e)}. "
-                    "Please double check the validity of the provided path."
-                )
-        self._location_df.to_csv(path)
-
-    def save_activity_scores_pkl(self, path: Path | str):
-        """Saves pathway activity scores DataFrame as a pickle.
-
-        Parameters
-        ----------
-        path : Path | str
-            Pathlike string or Path object.
-        """
-        if isinstance(path, str):
-            try:
-                path = Path(path)
-            except Exception as e:
-                raise ValueError(
-                    f"Could not convert path to Path object. Error: {str(e)}. "
-                    "Please double check the validity of the provided path."
-                )
-        if not path.exists():
-            try:
-                path.mkdir(parents=True)
-            except Exception as e:
-                raise ValueError(
-                    f"Error: {str(e)}. "
-                    "Please double check the validity of the provided path."
-                )
-        self._pas_df.to_pickle(path)
-
-    def save_locations_pkl(self, path: Path | str):
-        """Saves location DataFrame as a pickle.
-
-        Parameters
-        ----------
-        path : Path | str
-            Pathlike string or Path object.
-        """
-        if isinstance(path, str):
-            try:
-                path = Path(path)
-            except Exception as e:
-                raise ValueError(
-                    f"Could not convert path to Path object. Error: {str(e)}. "
-                    "Please double check the validity of the provided path."
-                )
-        if not path.exists():
-            try:
-                path.mkdir(parents=True)
-            except Exception as e:
-                raise ValueError(
-                    f"Error: {str(e)}. "
-                    "Please double check the validity of the provided path."
-                )
-        self._location_df.to_pickle(path)
-
     def plot_activity_scores(
         self,
         pathway: str,
         size: int = 20,
-        cmap: Colormap | None = None,
-        figsize: tuple[float, float] = (6.0, 5.0),
+        cmap: Colormap | str = "viridis",
+        figsize: tuple[float, float] = (6.0, 6.0),
         ax: plt.Axes | None = None,
     ):
         """Plots the pathway activity scores of a given pathway of interest
@@ -183,23 +78,22 @@ class SplatReport:
         Parameters
         ----------
         pathway : str
+            The name of the pathway to plot.
 
         size : int
             Default: 20. The size of the scatter points.
 
         cmap : Colormap | None
-            Default: None. If None, uses a default Colormap.
+            Default:  "viridis". The colormap to use for the scatter plot.
 
         figsize : tuple[float, float]
-            Default: (6.0, 5.0) The size of the figure.
+            Default: (6.0, 6.0) The size of the figure.
 
         ax : plt.Axes | None
             Default: None. If None, creates a new figure.
         """
         if cmap is None:
-            cmap = ListedColormap(
-                ["#8ECAE6", "#219EBC", "#023047", "#FFB703", "#FB8500"]
-            )
+            cmap = "viridis"
         if ax is None:
             fig, ax = plt.subplots(figsize=figsize)
         else:
@@ -216,9 +110,9 @@ class SplatReport:
             vmin=cdata.max(),
             vmax=cdata.min(),
         )
-        plt.colorbar(scatter)
-        ax.set_title(f"Activity Scores for {pathway}")
-        plt.tight_layout()
+        cbar = plt.colorbar(scatter, ax=ax)
+        cbar.set_label(rotation=270, labelpad=15)
+        ax.set_title(f"PAS for {pathway[:30]}")
+        fig.tight_layout()
         plt.close(fig)
-
         return fig

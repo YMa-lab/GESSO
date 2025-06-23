@@ -1,0 +1,4 @@
+sphinx>=8.2.3
+nbsphinx>=0.9.7
+sphinx-rtd-theme>=3.0.2
+

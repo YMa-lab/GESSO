@@ -13,7 +13,6 @@ from .computation import (
     bulk_normalize,
     gLPCA,
     gLPCA_sparse,
-    partition_simulated_annealing,
     partition_kmeans_stratified,
     partition_naive,
 )
@@ -118,9 +117,7 @@ class Splat:
         transform_method: Literal["none", "standardize"] = "standardize",
         n_jobs: int = -1,
         n_partitions: int | None = None,
-        partition_method: Literal[
-            "random", "stratified_kmeans", "simulated_annealing"
-        ] = "simulated_annealing",
+        partition_method: Literal["random", "stratified_kmeans"] = "stratified_kmeans",
         partition_seed: int = 42,
         metagene_sign_assignment_method: Literal[
             "none",
@@ -168,8 +165,8 @@ class Splat:
             If not specified, uses `n_partitions = int(n_obs / 5000)`.
             If `n_partitions < 2`, uses `n_partitions = 2`.
 
-        partition_method : Literal["random", "stratified_kmeans", "simulated_annealing"]
-            Default: "simulated_annealing". Method to use for partitioning the
+        partition_method : Literal["random", "stratified_kmeans"]
+            Default: "stratified_kmeans". Method to use for partitioning the
             observations into subsets for the low resolution method. Ignored if
             compute_method is "cpu-sparse" or "cpu".
 
@@ -322,20 +319,6 @@ class Splat:
             elif partition_method == "stratified_kmeans":
                 partitioned_indices = partition_kmeans_stratified(
                     df=self._locations_df, k=n_partitions, seed=partition_seed
-                )
-            elif partition_method == "simulated_annealing":
-                partitioned_indices = partition_simulated_annealing(
-                    df=self._locations_df,
-                    k=n_partitions,
-                    seed=partition_seed,
-                    bins="auto",
-                    max_iterations=10000,
-                    cooling_rate=0.995,
-                    batch_size="auto",
-                    initialization_method="stratified_kmeans",
-                    early_stopping=True,
-                    early_stopping_interval=100,
-                    verbose_interval=1000,
                 )
             else:
                 raise ValueError(

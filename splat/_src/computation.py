@@ -153,135 +153,6 @@ def bulk_normalize(
     return x
 
 
-def gLPCA(
-    X: np.ndarray,
-    L: sparse.csr_matrix,
-    pathway_name: str,
-    genes_in_pathway: list,
-    beta: float = 0,
-    job_num: int | None = None,
-    metagene_sign_assignment_method: Literal[
-        "none", "sign_max_abs", "most_frequent_sign_weights", "most_frequent_sign_corrs"
-    ] = "sign_max_abs",
-) -> tuple[np.ndarray, np.ndarray, str, list[str]]:
-    """This method implements Theorem 3.1 of the paper Graph-Laplacian PCA:
-    Closed-form Solution and Robustness by Bo Jiang, Chris Ding, Bin Luo, and Jin Tang
-
-    This version uses dense matrix operations for X and G, but keeps L sparse.
-
-    Parameters
-    ----------
-    X : np.ndarray ~ (n_genes, n_obs)
-        Gene expression matrix.
-
-    L : sparse.csr_matrix ~ (n_obs, n_obs)
-        Graph Laplacian matrix. Must be sparse.
-
-    pathway_name : str
-        Name of the pathway.
-
-    genes_in_pathway : list
-        List of genes in the pathway.
-
-    beta : float
-        Must be in interval [0, 1].
-
-    job_num : int
-        Job number for logging updates.
-
-    metagene_sign_assignment_method : Literal["none", "sign_max_abs", \
-        "most_frequent_sign_weights", "most_frequent_sign_corrs"]
-        Default: "sign_max_abs". As with all PCA/SVD-based methods, SPLAT suffers 
-        from a sign ambiguity problem. This parameter sets the heuristics-based 
-        method to determine the sign of the metagene weights. The pathway 
-        activity scores are modified accordingly.
-        Options:
-        - "none": None.
-        - "sign_max_abs": Multiplies the metagene by `sign(max(abs(metagene)))`.
-        - "most_frequent_sign_weights": Multiplies the metagene by the most frequent
-            sign of all metagene weights.
-        - "most_frequent_sign_corrs": Computes the Pearson correlation between 
-            the pathway activity scores and the gene expression for all genes 
-            in the pathway. Multiplies the metagene by the most frequent sign of 
-            all resulting Pearson correlation coefficients.
-
-    Returns
-    -------
-    np.ndarray ~ (n_genes)
-        1D metagene vector (optimal U vector).
-
-    np.ndarray ~ (n_obs)
-        1D pathway activity score vector (optimal V vector).
-
-    str
-        Name of the pathway.
-
-    list[str]
-        List of genes in the pathway.
-    """
-    if not isinstance(X, np.ndarray):
-        raise ValueError("X must be a numpy array.")
-
-    if not isinstance(L, sparse.csr_matrix):
-        raise ValueError("L must be a sparse csr matrix.")
-
-    start = time.time()
-    n = X.shape[1]
-    G = X.T @ X
-    print_wrapped(f"(Job {job_num}: {pathway_name}) " "Computed gram matrix", "DEBUG")
-
-    lmbda = scipy.linalg.eigh(
-        G, subset_by_index=[G.shape[0] - 1, G.shape[0] - 1], eigvals_only=True
-    )[0]
-    print_wrapped(f"(Job {job_num}: {pathway_name}) " "Computed lmbda", "DEBUG")
-
-    ident = np.eye(n)
-    psd_temp = ident - G / lmbda
-
-    xi = splinalg.eigsh(L, k=1, return_eigenvectors=False, which="LA")[0]
-    print_wrapped(f"(Job {job_num}: {pathway_name}) " "Computed xi", "DEBUG")
-
-    # Convert L to dense for this operation
-    L_dense = L.toarray()
-    G_beta = (1 - beta) * psd_temp + beta * (L_dense / xi + ident / n)
-
-    _, eigenvector = scipy.linalg.eigh(G_beta, subset_by_index=[0, 0])
-    print_wrapped(f"(Job {job_num}: {pathway_name}) " "Computed eigenpair", "DEBUG")
-
-    v_optimal = eigenvector[:, 0].flatten()
-
-    u_optimal = X @ v_optimal
-
-    # scale the metagenes to have unit norm
-    scaling_factor = np.linalg.norm(u_optimal)
-    u_optimal = u_optimal / scaling_factor
-    v_optimal = v_optimal * scaling_factor
-
-    u_optimal, v_optimal = align_metagene_sign(
-        u_optimal=u_optimal,
-        v_optimal=v_optimal,
-        X=X,
-        method=metagene_sign_assignment_method,
-    )
-
-    end = time.time()
-    seconds = np.round(end - start, 2)
-
-    if job_num is not None:
-        print_wrapped(
-            f"(Job {job_num}: {pathway_name}) "
-            f"Activity score computation for {pathway_name} completed "
-            f"in {seconds} seconds."
-        )
-    else:
-        print_wrapped(
-            f"Activity score computation for pathway {pathway_name} "
-            f"completed in {seconds} seconds."
-        )
-
-    return u_optimal, v_optimal, pathway_name, genes_in_pathway
-
-
 def gLPCA_sparse(
     X: np.ndarray | sparse.csr_matrix,
     L: sparse.csr_matrix,
@@ -290,8 +161,13 @@ def gLPCA_sparse(
     beta: float = 0,
     job_num: int | None = None,
     metagene_sign_assignment_method: Literal[
-        "none", "sign_max_abs", "most_frequent_sign_weights", "most_frequent_sign_corrs"
-    ] = "sign_max_abs",
+        "none",
+        "sign_max_abs",
+        "most_frequent_sign_weights",
+        "most_frequent_sign_corrs",
+        "sign_overall_expression_proxy",
+    ] = "sign_overall_expression_proxy",
+    verbose: bool = True,
 ) -> tuple[np.ndarray, np.ndarray, str, list[str]]:
     """This method implements Theorem 3.1 of the paper Graph-Laplacian PCA:
     Closed-form Solution and Robustness by Bo Jiang, Chris Ding, Bin Luo, and Jin Tang.
@@ -321,7 +197,7 @@ def gLPCA_sparse(
 
     metagene_sign_assignment_method : Literal["none", "sign_max_abs", \
         "most_frequent_sign_weights", "most_frequent_sign_corrs"]
-        Default: "sign_max_abs". As with all PCA/SVD-based methods, SPLAT suffers 
+        Default: "sign_overall_expression_proxy". As with all PCA/SVD-based methods, SPLAT suffers 
         from a sign ambiguity problem. This parameter sets the heuristics-based 
         method to determine the sign of the metagene weights. The pathway 
         activity scores are modified accordingly.
@@ -334,6 +210,13 @@ def gLPCA_sparse(
             the pathway activity scores and the gene expression for all genes 
             in the pathway. Multiplies the metagene by the most frequent sign of 
             all resulting Pearson correlation coefficients.
+        - "sign_overall_expression_proxy": Computes the Pearson correlation
+            between the pathway activity scores and the overall expression of
+            all genes in the pathway. Multiplies the metagene by the most frequent
+            sign of the resulting Pearson correlation coefficients.
+
+    verbose : bool
+        Default: True. If False, does not print the message.
 
     Returns
     -------
@@ -362,21 +245,33 @@ def gLPCA_sparse(
     start = time.time()
     n = X.shape[1]
     G = X.T @ X
-    print_wrapped(f"(Job {job_num}: {pathway_name}) " "Computed gram matrix", "DEBUG")
+    print_wrapped(
+        f"(Job {job_num}: {pathway_name}) " "Computed gram matrix",
+        "DEBUG",
+        verbose=verbose,
+    )
 
     lmbda = splinalg.eigsh(G, k=1, return_eigenvectors=False, which="LA")[0]
-    print_wrapped(f"(Job {job_num}: {pathway_name}) " "Computed lmbda", "DEBUG")
+    print_wrapped(
+        f"(Job {job_num}: {pathway_name}) " "Computed lmbda", "DEBUG", verbose=verbose
+    )
 
     ident = sparse.eye(n)
     psd_temp = ident - G / lmbda
 
     xi = splinalg.eigsh(L, k=1, return_eigenvectors=False, which="LA")[0]
-    print_wrapped(f"(Job {job_num}: {pathway_name}) " "Computed xi", "DEBUG")
+    print_wrapped(
+        f"(Job {job_num}: {pathway_name}) " "Computed xi", "DEBUG", verbose=verbose
+    )
 
     G_beta = (1 - beta) * psd_temp + beta * (L / xi + ident / n)
 
     eigenvalue, eigenvector = splinalg.eigsh(G_beta, k=1, which="SA")
-    print_wrapped(f"(Job {job_num}: {pathway_name}) " "Computed eigenpair", "DEBUG")
+    print_wrapped(
+        f"(Job {job_num}: {pathway_name}) " "Computed eigenpair",
+        "DEBUG",
+        verbose=verbose,
+    )
 
     eigenvalue = eigenvalue[0]
     v_optimal = eigenvector.flatten()
@@ -402,12 +297,14 @@ def gLPCA_sparse(
         print_wrapped(
             f"(Job {job_num}: {pathway_name}) "
             f"Activity score computation for {pathway_name} completed "
-            f"in {seconds} seconds."
+            f"in {seconds} seconds.",
+            verbose=verbose,
         )
     else:
         print_wrapped(
             f"Activity score computation for pathway {pathway_name} "
-            f"completed in {seconds} seconds."
+            f"completed in {seconds} seconds.",
+            verbose=verbose,
         )
 
     return u_optimal, v_optimal, pathway_name, genes_in_pathway

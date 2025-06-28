@@ -1,7 +1,5 @@
-from .splat import Splat
-from .interactive import SplatReport
+from .splat import SPLAT
+from .interactive import PathwayActivityScoresReport
 from .console import print_options
 
-__all__ = ["Splat", "SplatReport", "print_options"]
-
-__version__ = "0.1.0a1"
+__all__ = ["SPLAT", "PathwayActivityScoresReport", "print_options"]

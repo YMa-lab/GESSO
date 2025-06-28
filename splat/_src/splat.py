@@ -1,24 +1,22 @@
 import os
 import pandas as pd
-import scipy.stats
 import scipy.spatial
 import scipy.sparse as sparse
 import numpy as np
 from joblib import Parallel, delayed
 from typing import Literal
 from .console import print_wrapped
-from .interactive import SplatReport
+from .interactive import PathwayActivityScoresReport
 from .computation import (
     bulk_standard_scale,
     bulk_normalize,
-    gLPCA,
     gLPCA_sparse,
     partition_kmeans_stratified,
     partition_naive,
 )
 
 
-class Splat:
+class SPLAT:
     """A SPLAT model for spatially informed gene set expression analysis.
     SPLAT stands for Spatial Pathway Level Analysis Tool.
     """
@@ -32,27 +30,31 @@ class Splat:
         normalize_counts_method: Literal[
             "normalize", "normalize-log1p", "none"
         ] = "none",
+        verbose: bool = True,
     ):
         """Constructs a SPLAT model.
         SPLAT stands for Spatial Pathway Level Analysis Tool.
-
+        SPLAT computes a pathway activity score (PAS) for each spatial
+        location/spot in the provided expression data.
 
         Parameters
         ----------
-        expression_df : pd.DataFrame ~ (n_genes, n_obs)
-            A DataFrame containing n_genes rows and n_obs columns. Each row
-            corresponds to a gene and each column corresponds to an observation.
-            Entry (i, j) is the raw expression level of gene i in observation j
-            (i.e., number of counts).
+        expression_df : pd.DataFrame ~ (n_spots, n_genes)
+            A DataFrame containing n_spots rows and n_genes columns.
+            The index will be interpreted as the spot ID.
+            The columns will be interpreted as gene names.
 
-        location_df : pd.DataFrame ~ (n_obs, 2)
-            A DataFrame containing n_obs rows and 2 columns. The columns must
-            be named 'x' and 'y'. Each row corresponds to the location
-            (x, y coordinates) of an observation.
+        location_df : pd.DataFrame ~ (n_spots, 2)
+            A DataFrame containing n_spots rows and 2 columns.
+            The index will be interpreted as the spot ID.
+            The index of `location_df` must match the index of the `expression_df`.
+            The columns must be named 'x' and 'y'.
+            Each row represents the location (xy coordinates) of that spot.
 
         pathways_df : pd.DataFrame ~ (n_genes, n_pathways)
-            A DataFrame containing n_genes rows and n_pathways columns. Each
-            row corresponds to a gene and each column corresponds to a pathway.
+            A DataFrame containing n_genes rows and n_pathways columns.
+            The index will be interpreted as gene names.
+            The columns will be interpreted as pathway names.
             The values must be binary (0 or 1). Entry (i, j) is 1 if gene i is
             in pathway j, and 0 otherwise.
 
@@ -62,24 +64,27 @@ class Splat:
 
         normalize_counts_method : Literal["normalize", "normalize-log1p", "none"]
             Default: "none". How to normalize the counts for each
-            observation. If "normalize", first scales the total counts for each
-            observation vector (column) to 1,
-            then multiplies each observation vector (column)
-            by the median of the total counts for all observation vectors.
+            spot. If "normalize", first scales the total counts for each
+            spot vector (row) to 1, then multiplies each spot vector (row)
+            by the median of the total counts for all spot vectors.
             If "normalize-log1p", follows steps for "normalize" but also includes a
             log1p transformation.
-        """
 
+        verbose : bool
+            Default: True. If True, prints progress messages during initialization.
+        """
         # preprocess input data
-        self._expression_df = expression_df.copy()
+        self._expression_df = expression_df.T.copy()
         self._locations_df = location_df.copy()
         if pathways_df is not None:
             self._pathways_df = pathways_df.copy()
         else:
             self._pathways_df = None
 
+        self._verbose = verbose
+
         self._force_common_genes()
-        self._force_common_observation()
+        self._force_common_cellid()
 
         self._verify_examples_match()
         self._verify_location_df()
@@ -93,41 +98,36 @@ class Splat:
                 index=self._expression_df.index,
                 columns=self._expression_df.columns,
             )
-            print_wrapped("Normalized expression data with strategy `normalize`.")
+            print_wrapped(
+                "Normalized expression data with strategy 'normalize'.", verbose=verbose
+            )
         elif normalize_counts_method == "normalize-log1p":
             self._expression_df = pd.DataFrame(
                 bulk_normalize(self._expression_df.to_numpy(), log1p=True),
                 index=self._expression_df.index,
                 columns=self._expression_df.columns,
             )
-            print_wrapped("Normalized expression data with strategy `normalize-log1p`.")
+            print_wrapped(
+                "Normalized expression data with strategy 'normalize-log1p'.",
+                verbose=verbose,
+            )
         elif normalize_counts_method != "none":
-            raise ValueError("Invalid input for parameter `normalize_counts`.")
+            raise ValueError("Invalid input for parameter 'normalize_counts'.")
         self._q_cache = None
-        print_wrapped("Model initialization complete.")
+        print_wrapped("Model initialization complete.", verbose=verbose)
 
-    def generate_activity_scores_report(
+    def generate_pas_report(
         self,
         pathways: list[str] | None = None,
         pathways_dict: dict[str, list[str]] | None = None,
-        beta: float = 0.25,
-        compute_method: Literal[
-            "cpu-sparse", "cpu", "lowres-sparse", "lowres"
-        ] = "cpu-sparse",
-        transform_method: Literal["none", "standardize"] = "standardize",
+        beta: float = 0.33,
+        compute_method: Literal["cpu", "lowres"] = "cpu",
         n_jobs: int = -1,
         n_partitions: int | None = None,
         partition_method: Literal["random", "stratified_kmeans"] = "stratified_kmeans",
         partition_seed: int = 42,
-        metagene_sign_assignment_method: Literal[
-            "none",
-            "sign_max_abs",
-            "most_frequent_sign_weights",
-            "most_frequent_sign_corrs",
-            "sign_overall_expression_proxy",
-        ] = "sign_overall_expression_proxy",
         store_metagenes: bool = True,
-    ) -> SplatReport:
+    ) -> PathwayActivityScoresReport:
         """
         Parameters
         ----------
@@ -144,15 +144,10 @@ class Splat:
             of genes in the pathway. Overrides the pathways parameter.
 
         beta : float
-            Default: 0.25. Must be in the interval [0, 1]. Suggested beta < 0.5.
+            Default: 0.33. Must be in the interval [0, 1]. Suggested beta < 0.5.
 
         compute_method : Literal["cpu-sparse", "cpu", "lowres-sparse", "lowres"]
             The method to use for computation.
-
-        transform_method : Literal["none", "standardize"]
-            The method to use for transforming the data matrix.
-            If "standardize", centers and scales each feature vector (rows) to
-            have mean 0 and std 1. Default: "standardize".
 
         n_jobs : int
             Default: 1. Number of parallel jobs to run. If -1, uses half of
@@ -162,41 +157,16 @@ class Splat:
             Default: None. Number of low resolution subsets to use for the lowres
             method. Must be an integer if compute_method is "lowres-sparse" or
             "lowres". Ignored if compute_method is "cpu-sparse" or "cpu".
-            If not specified, uses `n_partitions = int(n_obs / 5000)`.
+            If not specified, uses `n_partitions = int(n_spots / 5000)`.
             If `n_partitions < 2`, uses `n_partitions = 2`.
 
         partition_method : Literal["random", "stratified_kmeans"]
             Default: "stratified_kmeans". Method to use for partitioning the
-            observations into subsets for the low resolution method. Ignored if
+            spots into subsets for the low resolution method. Ignored if
             compute_method is "cpu-sparse" or "cpu".
 
         partition_seed : int
             Default: 42. Random seed for reproducibility.
-
-        metagene_sign_assignment_method : Literal["none", "sign_max_abs", \
-            "most_frequent_sign_weights", "most_frequent_sign_corrs", \
-            "sign_overall_expression_proxy"]
-            Default: "sign_overall_expression_proxy". 
-            As with all PCA/SVD-based methods, SPLAT suffers 
-            from a sign ambiguity problem. This parameter sets the heuristics-based 
-            method to determine the sign of the metagene weights. The pathway 
-            activity scores are modified accordingly.
-            Options:
-            - "none": None.
-            - "sign_max_abs": Multiplies the metagene by `sign(max(abs(metagene)))`.
-            - "most_frequent_sign_weights": Multiplies the metagene by the most frequent
-                sign of all metagene weights.
-            - "most_frequent_sign_corrs": Computes the Pearson correlation between 
-                the pathway activity scores and the gene expression for all genes 
-                in the pathway. Multiplies the metagene by the most frequent sign of 
-                all resulting Pearson correlation coefficients.
-            - "sign_overall_expression_proxy": Builds an “overall-expression proxy” 
-                for each spot—e.g., the (optionally |u|-weighted) mean expression of 
-                all genes in the pathway—then computes the Pearson correlation 
-                between this proxy and the pathway-activity vector v. 
-                The metagene (and v) are multiplied by sign(corr), 
-                ensuring that positive activity scores correspond to higher aggregate 
-                pathway expression in the original matrix X.
 
         store_metagenes : bool
             Default: True. If True, stores metagene values.
@@ -204,7 +174,7 @@ class Splat:
 
         Returns
         -------
-        SplatReport
+        PathwayActivityScoresReport
         """
         if beta < 0 or beta > 1:
             raise ValueError('Parameter "beta" must be in interval [0, 1].')
@@ -235,31 +205,25 @@ class Splat:
         n_jobs = min(len(pathways), n_jobs)
 
         # begin computation
-
-        if compute_method in ["cpu-sparse", "cpu"]:
+        if compute_method == "cpu":
             print_wrapped(
                 "Beginning activity score computation "
                 f"for {len(pathways)} pathways "
                 f"with {n_jobs} jobs. "
-                f"Method used: {compute_method}."
+                f"Method used: {compute_method}.",
+                verbose=self._verbose,
             )
-
             pas_df = pd.DataFrame(columns=self._expression_df.columns)
             pathway_to_metagene_df_dict = dict()
 
             L = self._laplacian
-
-            if compute_method == "cpu-sparse":
-                method_f = gLPCA_sparse
-            elif compute_method == "cpu":
-                method_f = gLPCA
+            method_f = gLPCA_sparse
 
             def process_pathway(
                 pathway: str, genes_in_pathway: pd.Index, job_num: int
             ) -> tuple[str, np.ndarray, np.ndarray, pd.Index]:
                 X: np.ndarray = self._expression_df.loc[genes_in_pathway].to_numpy()
-                if transform_method == "standardize":
-                    X = bulk_standard_scale(X, axis=1)
+                X = bulk_standard_scale(X, axis=1)
                 u, v, _, _ = method_f(
                     X=X,
                     L=L,
@@ -267,7 +231,8 @@ class Splat:
                     pathway_name=pathway,
                     genes_in_pathway=genes_in_pathway,
                     job_num=job_num,
-                    metagene_sign_assignment_method=metagene_sign_assignment_method,
+                    metagene_sign_assignment_method="sign_overall_expression_proxy",
+                    verbose=self._verbose,
                 )
                 return pathway, v, u, genes_in_pathway
 
@@ -295,13 +260,13 @@ class Splat:
                         u, index=genes_in_pathway, columns=[pathway]
                     )
 
-            return SplatReport(
+            return PathwayActivityScoresReport(
                 pas_df=pas_df.transpose(),
                 location_df=self._locations_df,
                 pathway_to_metagene_df_dict=pathway_to_metagene_df_dict,
             )
 
-        elif compute_method in ["lowres-sparse", "lowres"]:
+        elif compute_method == "lowres":
             print(
                 "Beginning low resolution activity scores computation "
                 f"for {len(pathways)} pathways "
@@ -322,14 +287,11 @@ class Splat:
                 )
             else:
                 raise ValueError(
-                    f"Invalid input for parameter `partition_method`: "
+                    f"Invalid input for parameter 'partition_method': "
                     f"{partition_method}."
                 )
 
-            if compute_method == "lowres-sparse":
-                method_f = gLPCA_sparse
-            elif compute_method == "lowres":
-                method_f = gLPCA
+            method_f = gLPCA_sparse
 
             def process_pathway(
                 pathway: str,
@@ -345,8 +307,7 @@ class Splat:
                 local_laplacian = self._compute_laplacian_knn(
                     k=self._k, locations_df=self._locations_df.loc[subset_index]
                 )
-                if transform_method == "standardize":
-                    X = bulk_standard_scale(X, axis=1)
+                X = bulk_standard_scale(X, axis=1)
                 u, v, _, _ = method_f(
                     X=X,
                     L=local_laplacian,
@@ -354,6 +315,7 @@ class Splat:
                     pathway_name=pathway,
                     genes_in_pathway=genes_in_pathway,
                     job_num=job_num,
+                    verbose=self._verbose,
                 )
                 return (
                     pathway,
@@ -368,7 +330,8 @@ class Splat:
             print_wrapped(
                 "Beginning low resolution activity score computation "
                 f"for {len(pathways)} pathways "
-                f"with {n_jobs} jobs."
+                f"with {n_jobs} jobs.",
+                verbose=self._verbose,
             )
 
             parallel_input_list = []
@@ -460,126 +423,31 @@ class Splat:
                         metagene_average, index=genes_in_pathway, columns=[pathway]
                     )
 
-            return SplatReport(
+            return PathwayActivityScoresReport(
                 pas_df=pas_df.transpose(),
                 location_df=self._locations_df,
                 pathway_to_metagene_df_dict=pathway_to_metagene_df_dict,
             )
 
         else:
-            raise ValueError("Invalid input for parameter `compute_method`.")
+            raise ValueError("Invalid input for parameter 'compute_method'.")
 
-    def test_pathway(
+    def identify_spots_with_elevated_pas(
         self,
         pathway: str | None = None,
         genes_in_pathway: list[str] | None = None,
-        beta: float = 0.25,
-        control_size: int = 100,
-        seed: int = 42,
-        n_jobs: int = -1,
-    ) -> float:
-        """Conducts a permutation test to determine if the pathway is spatially
-        significantly different from control genes.
-
-        Parameters
-        ----------
-        pathway : str | None
-            Default: None. Name of the pathway to test. If None, genes_in_pathway must
-            be provided.
-
-        genes_in_pathway : list[str] | None
-            Default: None. List of genes in the pathway to test. If None, pathway must
-            be provided. Overrides pathway if not None.
-
-        beta : float
-            Default: 0.25. Must be in the interval [0, 1]. Suggested beta < 0.5.
-
-        control_size : int
-            Default: 100. Number of control genes to sample for the permutation test.
-
-        seed : int
-            Default: 42. Random seed for reproducibility.
-
-        n_jobs : int
-            Default: -1. Number of parallel jobs to run. If -1, uses all available CPUs.
-
-        Returns
-        -------
-        float
-            The p-value of the test. The p-value is the proportion of
-            control genes that have a higher pathway activity score than the observed
-            pathway activity score.
-        """
-        if pathway is None and genes_in_pathway is None:
-            raise ValueError("Both pathway and genes_in_pathway cannot be None.")
-
-        if n_jobs == -1:
-            n_jobs = os.cpu_count()
-        if n_jobs < 1:
-            n_jobs = 1
-
-        all_genes = self._expression_df.index.to_list()
-
-        if pathway is not None:
-            genes_in_pathway = self._pathways_df[
-                self._pathways_df[pathway] == 1
-            ].index.to_list()
-        p_pathway_name = "SPLAT:::test_pathway:::p"
-        pathways_dict = {p_pathway_name: genes_in_pathway}
-
-        q_pathway_name = "SPLAT:::test_pathway:::q"
-        if self._q_cache is None:
-            pathways_dict[q_pathway_name] = all_genes
-
-        np.random.seed(seed)
-        control_pathway_names = []
-        for i in range(control_size):
-            control_genes = np.random.choice(
-                all_genes, len(genes_in_pathway), replace=False
-            )
-            control_pathway_name = f"SPLAT:::test_pathway:::CONTROL{i}"
-            pathways_dict[control_pathway_name] = control_genes
-            control_pathway_names.append(control_pathway_name)
-
-        activity_scores_df = self.generate_activity_scores_report(
-            pathways_dict=pathways_dict, beta=beta, n_jobs=n_jobs
-        ).activity_scores_df()
-
-        p_vector = activity_scores_df[p_pathway_name].to_numpy()
-        if self._q_cache is None:
-            q_vector = activity_scores_df[q_pathway_name].to_numpy()
-            self._q_cache = q_vector
-        else:
-            q_vector = self._q_cache
-
-        p_control_vectors = activity_scores_df[control_pathway_names].to_numpy().T
-
-        def euclidean_distance(x, y, log=True):
-            norm = np.linalg.norm(x - y)
-            if log:
-                return np.log(norm)
-            return norm
-
-        control_distance_distribution = [
-            euclidean_distance(p_control, q_vector) for p_control in p_control_vectors
-        ]
-        observed_distance = euclidean_distance(p_vector, q_vector)
-        z = (observed_distance - np.mean(control_distance_distribution)) / np.std(
-            control_distance_distribution
-        )
-        return 2 * min(scipy.stats.norm.cdf(z), 1 - scipy.stats.norm.cdf(z))
-
-    def test_pathway_spatial(
-        self,
-        pathway: str | None = None,
-        genes_in_pathway: list[str] | None = None,
-        beta: float = 0.25,
-        control_size: int = 100,
+        beta: float = 0.33,
+        control_size: int = 500,
         seed: int = 42,
         n_jobs: int = -1,
     ) -> pd.DataFrame:
-        """Conducts a permutation test to determine if the pathway is
-        significantly enriched in the data at certain spatial locations.
+        """Conducts a permutation test at each spot to systematically identify
+        spots with significantly elevated pathway activity.
+
+        The null hypothesis is that the pathway activity score
+        at each spot is not significantly different from the
+        activity score of a randomly sampled set of genes
+        of the same size as the pathway.
 
         Parameters
         ----------
@@ -592,10 +460,10 @@ class Splat:
             be provided. Overrides pathway if not None.
 
         beta : float
-            Default: 0.25. Must be in the interval [0, 1]. Suggested beta < 0.5.
+            Default: 0.33. Must be in the interval [0, 1]. Suggested beta < 0.5.
 
         control_size : int
-            Default: 100. Number of control genes to sample for the permutation test.
+            Default: 500. Number of control genes to sample for the permutation test.
 
         seed : int
             Default: 42. Random seed for reproducibility.
@@ -606,22 +474,35 @@ class Splat:
         Returns
         -------
         pd.DataFrame
-            A DataFrame with n_obs rows and 3 columns: 'x', 'y', and 'p-vals'. The 'x'
-            and 'y' columns contain the spatial coordinates of the observations. The
-            'p-vals' column contains the p-values of the permutation test for each
-            observation.
+            A DataFrame with n_spots rows and 4 columns: 'x', 'y', 'pas', and 'p'. The 'x'
+            and 'y' columns contain the spatial coordinates of the spots.
+            The 'pas' column contains the pathway activity score for each spot.
+            The 'p' column contains the p-values of the permutation test for each
+            spot.
         """
         if pathway is None and genes_in_pathway is None:
-            raise ValueError("Both pathway and genes_in_pathway cannot be None.")
+            raise ValueError("Both 'pathway' and 'genes_in_pathway' cannot be None.")
 
         all_genes = self._expression_df.index.to_list()
 
         if pathway is not None:
-            genes_in_pathway = self._pathways_df[
-                self._pathways_df[pathway] == 1
-            ].index.to_list()
-        p_pathway_name = "SPLAT:::test_pathway:::p"
-        pathways_dict = {p_pathway_name: genes_in_pathway}
+            if genes_in_pathway is None:
+                genes_in_pathway = self._pathways_df[
+                    self._pathways_df[pathway] == 1
+                ].index.to_list()
+                pathway_name = pathway
+            # if both pathway and genes_in_pathway are provided,
+            # we use genes_in_pathway, but keep the pathway as pathway name.
+            pathway_name = pathway
+
+        else:
+            if genes_in_pathway is None:
+                raise ValueError(
+                    "If 'pathway' is None, 'genes_in_pathway' must be provided."
+                )
+            pathway_name = "USER_DEFINED"
+
+        pathways_dict = {pathway_name: genes_in_pathway}
 
         np.random.seed(seed)
         control_pathway_names = []
@@ -629,22 +510,30 @@ class Splat:
             control_genes = np.random.choice(
                 all_genes, len(genes_in_pathway), replace=False
             )
-            control_pathway_name = f"SPLAT:::test_pathway:::CONTROL{i}"
+            control_pathway_name = f"CONTROL-{i}"
             pathways_dict[control_pathway_name] = control_genes
             control_pathway_names.append(control_pathway_name)
 
-        activity_scores_df = self.generate_activity_scores_report(
+        activity_scores_df = self.generate_pas_report(
             pathways_dict=pathways_dict, beta=beta, n_jobs=n_jobs
-        ).activity_scores_df()
+        ).pas_df()
 
-        p_cap = activity_scores_df[p_pathway_name].to_numpy()
+        location_index = self._locations_df.index
+        # reindex by location index to ensure alignment
+        activity_scores_df = activity_scores_df.loc[location_index]
+
+        p_cap = activity_scores_df[pathway_name].to_numpy()
         p_matrix = activity_scores_df[control_pathway_names].to_numpy().T
         prob_greater = np.sum(p_matrix > p_cap, axis=0) / len(p_matrix)
-        # p_vals = 2 * np.minimum(prob_greater, 1 - prob_greater)
         p_vals = prob_greater
         output = self._locations_df[["x", "y"]].join(
-            pd.DataFrame({"p-vals": p_vals}, index=self._locations_df.index)
+            pd.DataFrame({"p": p_vals}, index=self._locations_df.index)
         )
+        # since we already reindexed activity_scores_df by location_index,
+        # we can safely assign the pathway activity scores directly
+        output["pas"] = activity_scores_df[pathway_name].to_numpy()
+        # reorder columns to match expected output
+        output = output[["x", "y", "pas", "p"]]
         return output
 
     def _compute_laplacian_knn(
@@ -660,7 +549,7 @@ class Splat:
             Default: 20. Number of nearest neighbors to connect for each location.
 
         locations_df : pd.DataFrame | None
-            Default: None. DataFrame containing spatial coordinates of observations.
+            Default: None. DataFrame containing spatial coordinates of spots.
             If None, uses the spatial coordinates provided during initialization.
 
         Returns
@@ -691,6 +580,7 @@ class Splat:
             "Constructed Laplacian matrix from location data "
             f"with {k} nearest neighbors.",
             level="DEBUG",
+            verbose=self._verbose,
         )
 
         return laplacian
@@ -852,7 +742,8 @@ class Splat:
             if n_removed > 0:
                 print_wrapped(
                     f"Removed {n_removed} genes not found in {data_type} data. "
-                    f"{len(common_genes)} genes remain."
+                    f"{len(common_genes)} genes remain.",
+                    verbose=self._verbose,
                 )
 
         print_removal_info(n_genes_removed_pathway, "expression")
@@ -860,17 +751,19 @@ class Splat:
 
         print_wrapped(
             f"Identified {len(common_genes)} common genes in the pathway "
-            "and expression data."
+            "and expression data.",
+            verbose=self._verbose,
         )
 
         common_genes = list(common_genes)
         self._pathways_df = self._pathways_df.loc[common_genes]
         self._expression_df = self._expression_df.loc[common_genes]
 
-    def _force_common_observation(self):
+    def _force_common_cellid(self):
         """
-        Finds the common subset of observations. Then, indexes the location and
-        expression dataframes to only include the common observations.
+        Finds the common subset of spot/cell id index between the location and
+        expression dataframes. Then, indexes the location and
+        expression dataframes to only include the intersection of their indices.
         """
 
         def get_obs_set(df, attr: str) -> set[str]:
@@ -878,26 +771,28 @@ class Splat:
 
         obs_location_df = get_obs_set(self._locations_df, "index")
         obs_expression_df = get_obs_set(self._expression_df, "columns")
-        common_obs = obs_location_df.intersection(obs_expression_df)
+        common_spots = obs_location_df.intersection(obs_expression_df)
 
-        n_obs_removed_location = len(obs_location_df - common_obs)
-        n_obs_removed_expression = len(obs_expression_df - common_obs)
+        n_spots_removed_location = len(obs_location_df - common_spots)
+        n_spots_removed_expression = len(obs_expression_df - common_spots)
 
         def print_removal_info(n_removed: int, data_type: str):
             if n_removed > 0:
                 print_wrapped(
-                    f"Removed {n_removed} observations not found in {data_type} data. "
-                    f"{len(common_obs)} observations remain."
+                    f"Removed {n_removed} spots not found in {data_type} data. "
+                    f"{len(common_spots)} spots remain.",
+                    verbose=self._verbose,
                 )
 
-        print_removal_info(n_obs_removed_location, "expression")
-        print_removal_info(n_obs_removed_expression, "location")
+        print_removal_info(n_spots_removed_location, "expression")
+        print_removal_info(n_spots_removed_expression, "location")
 
         print_wrapped(
-            f"Identified {len(common_obs)} common observations in the location "
-            "and expression data."
+            f"Identified {len(common_spots)} common spots in the location "
+            "and expression data.",
+            verbose=self._verbose,
         )
 
-        common_obs_list: list[str] = list(common_obs)
-        self._locations_df = self._locations_df.loc[common_obs_list]
-        self._expression_df = self._expression_df[common_obs_list]
+        common_spots_list: list[str] = list(common_spots)
+        self._locations_df = self._locations_df.loc[common_spots_list]
+        self._expression_df = self._expression_df[common_spots_list]

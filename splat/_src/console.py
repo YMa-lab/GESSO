@@ -8,7 +8,7 @@ from pathlib import Path
 
 def make_default_logger() -> logging.Logger:
     default_logger_level = logging.INFO
-    logger = logging.Logger(name="Default SPLAGE Logger")
+    logger = logging.Logger(name="Default SPLAT Logger")
     logger.setLevel(default_logger_level)
     stream_handler = logging.StreamHandler(stream=sys.stdout)
     stream_handler.setLevel(default_logger_level)
@@ -66,10 +66,14 @@ class _PrintOptions:
     def mute(self):
         """Mutes. No messages will be printed."""
         self._muted = True
+        self.reset_logger()
+        self._logger.setLevel(logging.CRITICAL)
 
     def unmute(self):
         """Unmutes. Messages will be printed."""
         self._muted = False
+        self.reset_logger()
+        self._logger.setLevel(logging.INFO)
 
 
 print_options = _PrintOptions()
@@ -81,28 +85,32 @@ def bold_text(text):
 
 
 def print_wrapped(
-    text: str,
-    level: Literal["INFO", "DEBUG"] = "INFO",
+    text: str, level: Literal["INFO", "DEBUG"] = "INFO", verbose: bool = True
 ):
     """Logs text.
 
     Parameters
     ----------
     text : str.
-    type : Literal['WARNING', 'UPDATE', 'PROGRESS', None].
-        Default: None.
+
     level : Literal['INFO', 'DEBUG'].
         Default: 'INFO'.
+
+    verbose : bool
+        Default: True. If False, does not print the message.
     """
     base_message = text
 
+    if not verbose:
+        return
+
     if level == "DEBUG":
-        base_message = bold_text("SPLAGE (debug): ") + base_message
+        base_message = bold_text("SPLAT (debug): ") + base_message
         print_options._log_debug(
             fill_ignore_format(base_message, width=print_options._max_line_width)
         )
     elif level == "INFO":
-        base_message = bold_text("SPLAGE (info): ") + base_message
+        base_message = bold_text("SPLAT (info): ") + base_message
         print_options._log_info(
             fill_ignore_format(base_message, width=print_options._max_line_width)
         )

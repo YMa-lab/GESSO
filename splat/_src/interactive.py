@@ -3,7 +3,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.colors import Colormap
 import pandas as pd
-from typing import Literal
+from typing import Literal, Any
 
 
 class PathwayActivityScoresReport:
@@ -12,7 +12,7 @@ class PathwayActivityScoresReport:
     def __init__(
         self,
         pas_df: pd.DataFrame,
-        location_df: pd.DataFrame,
+        locations_df: pd.DataFrame,
         pathway_to_metagene_df_dict: dict,
     ) -> None:
         """Initializes the PathwayActivityScoresReport object.
@@ -29,8 +29,8 @@ class PathwayActivityScoresReport:
             Dictionary of pathway to metagene DataFrames.
         """
         self._pas_df = pas_df
-        self._location_df = location_df
-        self._orig_spot_order = location_df.index
+        self._location_df = locations_df
+        self._orig_spot_order = locations_df.index
         self._pathway_to_metagene_df_dict: dict[str, pd.DataFrame] = (
             pathway_to_metagene_df_dict
         )
@@ -148,7 +148,7 @@ class PathwayActivityScoresReport:
                 spine.set_visible(False)
 
         fig.colorbar(scatter, ax=ax, fraction=0.02, pad=0.01)
-        ax.set_title(f"SPLAT Pathway Activity Scores")
+        ax.set_title(f"SPLAT: Pathway Activity Scores")
         fig.tight_layout()
         plt.close(fig)
         return fig
@@ -160,7 +160,7 @@ class PermutationTestReport:
     def __init__(
         self,
         pathway: str,
-        permuation_test_df: pd.DataFrame,
+        permutation_test_df: pd.DataFrame,
     ):
         """Initializes the PermutationTestReport object.
 
@@ -174,14 +174,72 @@ class PermutationTestReport:
             Should have columns: 'x', 'y', 'pas', 'p'
         """
         self._pathway = pathway
-        self._permutation_test_df = permuation_test_df
+        self._permutation_test_df = permutation_test_df
+
+    def plot_pas_spatial_map(
+        self,
+        size: int = 20,
+        cmap: Colormap | str = "viridis",
+        show_coords: bool = False,
+        figsize: tuple[float, float] = (5.0, 5.0),
+        ax: Axes | None = None,
+    ) -> Figure:
+        """Plots the pathway activity scores of the permutation test across all locations.
+
+        Parameters
+        ----------
+        size : int
+            Default: 20. The size of the scatter points.
+
+        cmap : Colormap | None
+            Default: "viridis". The colormap to use for the scatter plot.
+
+        show_coords : bool
+            Default: False. If True, shows the coordinates of the points.
+
+        figsize : tuple[float, float]
+            Default: (5.0, 5.0). The size of the figure.
+
+        ax : plt.Axes | None
+            Default: None. If None, creates a new figure.
+        """
+        if cmap is None:
+            cmap = "viridis"
+        if ax is None:
+            fig, ax = plt.subplots(figsize=figsize)
+        else:
+            fig = ax.get_figure()
+        plotting_df = self._permutation_test_df
+
+        cdata = plotting_df[self._pathway].to_numpy()
+        scatter = ax.scatter(
+            x=plotting_df["x"],
+            y=plotting_df["y"],
+            c=cdata,
+            s=size,
+            cmap=cmap,
+            vmin=cdata.min(),
+            vmax=cdata.max(),
+        )
+        if not show_coords:
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.grid(False)
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+
+        fig.colorbar(scatter, ax=ax, fraction=0.02, pad=0.01)
+        ax.set_title(f"SPLAT: Permutation Test Results for {self._pathway}")
+        fig.tight_layout()
+        plt.close(fig)
+        return fig
 
     def plot_pval_spatial_map(
         self,
         size: int = 20,
         significance_threshold: float = 0.05,
-        significant_color: str = "purple",
-        not_significant_color: str = "gray",
+        significant_color: str | Any = "#800080",  # dark purple hex code
+        not_significant_color: str | Any = "#D3D3D3",
         show_coords: bool = False,
         figsize: tuple[float, float] = (5.0, 5.0),
         ax: Axes | None = None,
@@ -197,10 +255,10 @@ class PermutationTestReport:
             Default: 0.05. The threshold for significance.
 
         significant_color : str
-            Default: "purple". The color for significant points.
+            Default: "#800080". The color for significant points.
 
         not_significant_color : str
-            Default: "gray". The color for not significant points.
+            Default: "#D3D3D3". The color for not significant points.
 
         show_coords : bool
             Default: False. If True, shows the coordinates of the points.
@@ -221,19 +279,63 @@ class PermutationTestReport:
             significant_color if p < significance_threshold else not_significant_color
             for p in plotting_df["p"]
         ]
-        scatter = ax.scatter(
+        ax.scatter(
             x=plotting_df["x"],
             y=plotting_df["y"],
             c=colors,
             s=size,
         )
         ax.set_title(f"SPLAT: Spots with Elevated Activity")
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.grid(False)
-        for spine in ax.spines.values():
-            spine.set_visible(False)
+
+        if not show_coords:
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.grid(False)
+            for spine in ax.spines.values():
+                spine.set_visible(False)
 
         fig.tight_layout()
         plt.close(fig)
         return fig
+
+    def pas_df(self) -> pd.DataFrame:
+        """Returns the pathway activity scores DataFrame.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing the pathway activity scores.
+        """
+        return self._permutation_test_df[["pas"]].rename(columns={"pas": self._pathway})
+
+    def pval_df(self) -> pd.DataFrame:
+        """Returns the p-values DataFrame.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing the p-values.
+        """
+        return self._permutation_test_df[["p"]]
+
+    def locations_df(self) -> pd.DataFrame:
+        """Returns the locations DataFrame.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing the locations of the spots.
+            Contains two columns: 'x' and 'y'.
+        """
+        return self._permutation_test_df[["x", "y"]]
+
+    def htest_df(self) -> pd.DataFrame:
+        """Returns the full permutation test DataFrame.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing the full permutation test results.
+            Contains four columns: 'x', 'y', 'pas', 'p'.
+        """
+        return self._permutation_test_df

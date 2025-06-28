@@ -1,6 +1,4 @@
 import numpy as np
-import scipy
-import scipy.linalg
 import scipy.sparse as sparse
 import scipy.sparse.linalg as splinalg
 from typing import Literal
@@ -251,7 +249,12 @@ def gLPCA_sparse(
         verbose=verbose,
     )
 
-    lmbda = splinalg.eigsh(G, k=1, return_eigenvectors=False, which="LA")[0]
+    # initialize an rng
+    rng = np.random.default_rng(42)
+
+    lmbda = splinalg.eigsh(
+        G, k=1, return_eigenvectors=False, which="LA", v0=rng.standard_normal(n)
+    )[0]
     print_wrapped(
         f"(Job {job_num}: {pathway_name}) " "Computed lmbda", "DEBUG", verbose=verbose
     )
@@ -259,14 +262,18 @@ def gLPCA_sparse(
     ident = sparse.eye(n)
     psd_temp = ident - G / lmbda
 
-    xi = splinalg.eigsh(L, k=1, return_eigenvectors=False, which="LA")[0]
+    xi = splinalg.eigsh(
+        L, k=1, return_eigenvectors=False, which="LA", v0=rng.standard_normal(n)
+    )[0]
     print_wrapped(
         f"(Job {job_num}: {pathway_name}) " "Computed xi", "DEBUG", verbose=verbose
     )
 
     G_beta = (1 - beta) * psd_temp + beta * (L / xi + ident / n)
 
-    eigenvalue, eigenvector = splinalg.eigsh(G_beta, k=1, which="SA")
+    eigenvalue, eigenvector = splinalg.eigsh(
+        G_beta, k=1, which="SA", v0=rng.standard_normal(n)
+    )
     print_wrapped(
         f"(Job {job_num}: {pathway_name}) " "Computed eigenpair",
         "DEBUG",

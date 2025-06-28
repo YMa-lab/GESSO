@@ -6,7 +6,7 @@ import numpy as np
 from joblib import Parallel, delayed
 from typing import Literal
 from .console import print_wrapped
-from .interactive import PathwayActivityScoresReport
+from .interactive import PathwayActivityScoresReport, PermutationTestReport
 from .computation import (
     bulk_standard_scale,
     bulk_normalize,
@@ -24,7 +24,7 @@ class SPLAT:
     def __init__(
         self,
         expression_df: pd.DataFrame,
-        location_df: pd.DataFrame,
+        locations_df: pd.DataFrame,
         pathways_df: pd.DataFrame | None = None,
         k: int = 6,
         normalize_counts_method: Literal[
@@ -44,10 +44,10 @@ class SPLAT:
             The index will be interpreted as the spot ID.
             The columns will be interpreted as gene names.
 
-        location_df : pd.DataFrame ~ (n_spots, 2)
+        locations_df : pd.DataFrame ~ (n_spots, 2)
             A DataFrame containing n_spots rows and 2 columns.
             The index will be interpreted as the spot ID.
-            The index of `location_df` must match the index of the `expression_df`.
+            The index of `locations_df` must match the index of the `expression_df`.
             The columns must be named 'x' and 'y'.
             Each row represents the location (xy coordinates) of that spot.
 
@@ -75,7 +75,7 @@ class SPLAT:
         """
         # preprocess input data
         self._expression_df = expression_df.T.copy()
-        self._locations_df = location_df.copy()
+        self._locations_df = locations_df.copy()
         if pathways_df is not None:
             self._pathways_df = pathways_df.copy()
         else:
@@ -87,7 +87,7 @@ class SPLAT:
         self._force_common_cellid()
 
         self._verify_examples_match()
-        self._verify_location_df()
+        self._verify_locations_df()
         self._verify_gene_match()
         self._laplacian = self._compute_laplacian_knn(k=k)
         self._k = k
@@ -116,7 +116,7 @@ class SPLAT:
         self._q_cache = None
         print_wrapped("Model initialization complete.", verbose=verbose)
 
-    def generate_pas_report(
+    def compute_pas(
         self,
         pathways: list[str] | None = None,
         pathways_dict: dict[str, list[str]] | None = None,
@@ -262,7 +262,7 @@ class SPLAT:
 
             return PathwayActivityScoresReport(
                 pas_df=pas_df.transpose(),
-                location_df=self._locations_df,
+                locations_df=self._locations_df,
                 pathway_to_metagene_df_dict=pathway_to_metagene_df_dict,
             )
 
@@ -425,22 +425,22 @@ class SPLAT:
 
             return PathwayActivityScoresReport(
                 pas_df=pas_df.transpose(),
-                location_df=self._locations_df,
+                locations_df=self._locations_df,
                 pathway_to_metagene_df_dict=pathway_to_metagene_df_dict,
             )
 
         else:
             raise ValueError("Invalid input for parameter 'compute_method'.")
 
-    def identify_spots_with_elevated_pas(
+    def htest_elevated_pas(
         self,
         pathway: str | None = None,
         genes_in_pathway: list[str] | None = None,
         beta: float = 0.33,
-        control_size: int = 500,
+        n_permutations: int = 500,
         seed: int = 42,
         n_jobs: int = -1,
-    ) -> pd.DataFrame:
+    ) -> PermutationTestReport:
         """Conducts a permutation test at each spot to systematically identify
         spots with significantly elevated pathway activity.
 
@@ -462,8 +462,8 @@ class SPLAT:
         beta : float
             Default: 0.33. Must be in the interval [0, 1]. Suggested beta < 0.5.
 
-        control_size : int
-            Default: 500. Number of control genes to sample for the permutation test.
+        n_permutations : int
+            Default: 500. Number of random gene sets to sample for the test.
 
         seed : int
             Default: 42. Random seed for reproducibility.
@@ -473,12 +473,8 @@ class SPLAT:
 
         Returns
         -------
-        pd.DataFrame
-            A DataFrame with n_spots rows and 4 columns: 'x', 'y', 'pas', and 'p'. The 'x'
-            and 'y' columns contain the spatial coordinates of the spots.
-            The 'pas' column contains the pathway activity score for each spot.
-            The 'p' column contains the p-values of the permutation test for each
-            spot.
+        PermutationTestReport
+            A report containing the pathway activity scores and p-values for each spot.
         """
         if pathway is None and genes_in_pathway is None:
             raise ValueError("Both 'pathway' and 'genes_in_pathway' cannot be None.")
@@ -504,17 +500,17 @@ class SPLAT:
 
         pathways_dict = {pathway_name: genes_in_pathway}
 
-        np.random.seed(seed)
-        control_pathway_names = []
-        for i in range(control_size):
-            control_genes = np.random.choice(
-                all_genes, len(genes_in_pathway), replace=False
-            )
-            control_pathway_name = f"CONTROL-{i}"
-            pathways_dict[control_pathway_name] = control_genes
-            control_pathway_names.append(control_pathway_name)
+        # initialize an rng
+        rng = np.random.default_rng(seed)
 
-        activity_scores_df = self.generate_pas_report(
+        null_geneset_names = []
+        for i in range(n_permutations):
+            null_genes = rng.choice(all_genes, len(genes_in_pathway), replace=False)
+            random_pathway_name = f"random_geneset_{i}"
+            pathways_dict[random_pathway_name] = null_genes
+            null_geneset_names.append(random_pathway_name)
+
+        activity_scores_df = self.compute_pas(
             pathways_dict=pathways_dict, beta=beta, n_jobs=n_jobs
         ).pas_df()
 
@@ -523,18 +519,21 @@ class SPLAT:
         activity_scores_df = activity_scores_df.loc[location_index]
 
         p_cap = activity_scores_df[pathway_name].to_numpy()
-        p_matrix = activity_scores_df[control_pathway_names].to_numpy().T
+        p_matrix = activity_scores_df[null_geneset_names].to_numpy().T
         prob_greater = np.sum(p_matrix > p_cap, axis=0) / len(p_matrix)
         p_vals = prob_greater
-        output = self._locations_df[["x", "y"]].join(
+        permutation_test_df = self._locations_df[["x", "y"]].join(
             pd.DataFrame({"p": p_vals}, index=self._locations_df.index)
         )
         # since we already reindexed activity_scores_df by location_index,
         # we can safely assign the pathway activity scores directly
-        output["pas"] = activity_scores_df[pathway_name].to_numpy()
+        permutation_test_df["pas"] = activity_scores_df[pathway_name].to_numpy()
         # reorder columns to match expected output
-        output = output[["x", "y", "pas", "p"]]
-        return output
+        permutation_test_df = permutation_test_df[["x", "y", "pas", "p"]]
+        return PermutationTestReport(
+            pathway=pathway_name,
+            permutation_test_df=permutation_test_df,
+        )
 
     def _compute_laplacian_knn(
         self, k: int = 20, locations_df: pd.DataFrame | None = None
@@ -628,7 +627,7 @@ class SPLAT:
 
     def _verify_examples_match(self):
         """Checks that all examples match (i.e., columns of
-        self._gene_expression_df and index of self._location_df are equivalent).
+        self._gene_expression_df and index of self._locations_df are equivalent).
         Should be called prior to preprocessing.
         """
 
@@ -687,9 +686,9 @@ class SPLAT:
                 f"{', '.join(missing_pathways)}"
             )
 
-    def _verify_location_df(self):
+    def _verify_locations_df(self):
         """
-        Checks that the format of location_df is reasonable.
+        Checks that the format of locations_df is reasonable.
         Verifies the presence of 'x' and 'y' columns and ensures
         they contain numeric data.
         """
@@ -769,11 +768,11 @@ class SPLAT:
         def get_obs_set(df, attr: str) -> set[str]:
             return set(getattr(df, attr))
 
-        obs_location_df = get_obs_set(self._locations_df, "index")
+        obs_locations_df = get_obs_set(self._locations_df, "index")
         obs_expression_df = get_obs_set(self._expression_df, "columns")
-        common_spots = obs_location_df.intersection(obs_expression_df)
+        common_spots = obs_locations_df.intersection(obs_expression_df)
 
-        n_spots_removed_location = len(obs_location_df - common_spots)
+        n_spots_removed_location = len(obs_locations_df - common_spots)
         n_spots_removed_expression = len(obs_expression_df - common_spots)
 
         def print_removal_info(n_removed: int, data_type: str):

@@ -1,5 +1,5 @@
-from ._src import SPLAT, PathwayActivityScoresReport, print_options
+from ._src import SPLAT, PathwayActivityScoresReport, PermutationTestReport
 
-__all__ = ["SPLAT", "PathwayActivityScoresReport", print_options]
+__all__ = ["SPLAT", "PathwayActivityScoresReport", "PermutationTestReport"]
 
 __version__ = "0.1.0a1"

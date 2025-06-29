@@ -479,7 +479,7 @@ class SPLAT:
         if pathway is None and genes_in_pathway is None:
             raise ValueError("Both 'pathway' and 'genes_in_pathway' cannot be None.")
 
-        all_genes = self._expression_df.index.to_list()
+        all_genes = sorted(self._expression_df.index.to_list())
 
         if pathway is not None:
             if genes_in_pathway is None:

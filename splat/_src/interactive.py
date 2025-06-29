@@ -71,8 +71,8 @@ class PathwayActivityScoresReport:
             )
         return output
 
-    def location_df(self) -> pd.DataFrame:
-        """Returns the location DataFrame.
+    def locations_df(self) -> pd.DataFrame:
+        """Returns the locations DataFrame.
         The index is the spot ID. The columns are "x" and "y".
 
         Returns

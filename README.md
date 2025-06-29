@@ -5,7 +5,7 @@ quantifying the overall expression of gene sets/pathways. This repository is the
 
 ### Installation
 We recommend installing SPLAT in a new Python environment.
-```{bash}
+```bash
 git clone https://github.com/ajy25/splat.git
 cd splat
 pip install .
@@ -13,11 +13,11 @@ cd ..
 ```
 
 ### Quick start
-SPLAT takes in spatial transcriptomics data and returns a pathway activity score (PAS) for each spot.
+SPLAT processes spatial transcriptomics data along with a user-defined gene set (pathway) and outputs a pathway activity score (PAS) for each spatial spot.
 
-Suppose your dataset contains counts for $G$ genes across $N$ spots. You'll need to prepare an $N \times G$ expression `pd.DataFrame`, as well as an $N \times 2$ locations `pd.DataFrame`. The indices of the two DataFrames should match. The locations DataFrame should contain two columns named `x` and `y`.
+Suppose your spatial transcriptomics dataset contains counts for $G$ genes across $N$ spots. You'll need to prepare an $N \times G$ expression `pd.DataFrame` as well as an $N \times 2$ locations `pd.DataFrame`. The indices of the two DataFrames should match. The locations DataFrame should contain two columns named `x` and `y`.
 
-```{python}
+```python
 import pandas as pd
 from splat import SPLAT
 

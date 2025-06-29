@@ -1,5 +1,5 @@
 SPLAT
-=========
+=====
 SPLAT (Spatial Pathway level Analysis Tool) is a Python package 
 for quantifying the expression level of gene sets/pathways.
 SPLAT is designed for spatial transcriptomics data.
@@ -9,6 +9,10 @@ SPLAT is designed for spatial transcriptomics data.
    :caption: Contents:
    
    intro
+   splat_demo.ipynb
+   api_reference
 
-   
+
+
+
 

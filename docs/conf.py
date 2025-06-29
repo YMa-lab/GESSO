@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.abspath(".."))
 
 # -- Project information -----------------------------------------------------
 
-project = "TableMage"
+project = "SPLAT"
 copyright = "2025, Andrew Yang"
 author = "Andrew Yang"
 

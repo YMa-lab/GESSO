@@ -315,6 +315,7 @@ class SPLAT:
                     pathway_name=pathway,
                     genes_in_pathway=genes_in_pathway,
                     job_num=job_num,
+                    metagene_sign_assignment_method="sign_overall_expression_proxy",
                     verbose=self._verbose,
                 )
                 return (

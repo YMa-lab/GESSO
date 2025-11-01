@@ -1,58 +1,60 @@
-# SPLAT: Gene Set Expression Quantification for Spatial Transcriptomics Data
+# GESSO: Gene Set Expression Quantification for Spatial Transcriptomics Data
 
-Spatial Pathway Level Analysis Tool (SPLAT) is a computational method for 
-quantifying the overall expression of gene sets/pathways. This repository is the official Python implementation of SPLAT.
+GESSO (Gene sEt activity Score analysis with Spatial lOcation) is a computational method for 
+quantifying the overall expression of gene sets/pathways.
+
+This repository is the official Python implementation of GESSO.
 
 ### Installation
-We recommend installing SPLAT in a new Python environment.
+We recommend installing GESSO in a new Python environment.
 ```bash
-git clone https://github.com/ajy25/splat.git
-cd splat
+git clone https://github.com/YMa-Lab/GESSO.git
+cd gesso
 pip install .
 cd ..
 ```
 
 ### Quick start
-SPLAT processes spatial transcriptomics data along with a user-defined gene set (pathway) and outputs a pathway activity score (PAS) for each spatial spot.
+GESSO processes spatial transcriptomics data along with a user-defined gene set (aka pathway) and outputs a gene set activity score (GAS) for each spatial location.
 
-Suppose your spatial transcriptomics dataset contains counts for $G$ genes across $N$ spots. You'll need to prepare an $N \times G$ expression `pd.DataFrame` as well as an $N \times 2$ locations `pd.DataFrame`. The indices of the two DataFrames should match. The locations DataFrame should contain two columns named `x` and `y`.
+Let's say your spatial transcriptomics dataset contains counts for $G$ genes across $N$ spots. You'll need to prepare an $N \times G$ expression `pd.DataFrame` as well as an $N \times 2$ locations `pd.DataFrame`. The indices of the two DataFrames must match. The locations DataFrame must contain two columns named `x` and `y`.
 
 ```python
 import pandas as pd
-from splat import SPLAT
+from gesso import GESSO
 
 # load data
 expression_df: pd.DataFrame = ...
 locations_df: pd.DataFrame = ...
 
-# initialize a SPLAT model
-model = SPLAT(
+# initialize a GESSO model
+model = GESSO(
     expression_df=expression_df,
     locations_df=locations_df,
     k=20,   # increase k to increase spatial smoothing effect
     normalize_counts_method="normalize-log1p"   # optional, use for raw data
 )
 
-# compute pathway activity scores
-pas_report = model.compute_pas(
-    pathways_dict={
-        "example_pathway_1": ["gene1", "gene2", "gene3", ...],
-        "example_pathway_2": ["gene4", "gene5", "gene6", ...],
+# compute gene set activity scores
+gas_report = model.compute_gas(
+    genesets_dict={
+        "example_geneset_1": ["gene1", "gene2", "gene3"],
+        "example_geneset_2": ["gene4", "gene5", "gene6"],
     },
     n_jobs=2        # number of parallel jobs
 )
-pas_df = pas_report.pas_df()    # returns N by n_pathways df
-pas_df.to_csv(...)
+gas_df = gas_report.gas_df()    # returns N by n_genesets df
+gas_df.to_csv("gas_output.csv")
 
-# test whether each spot exhibits significantly elevated pathway activity
-htest_report = model.htest_elevated_pas(
-    pathway="example_pathway_1",
-    genes_in_pathway=["gene1", "gene2", "gene3", ...],
+# test whether each spot exhibits significantly elevated gene set activity
+htest_report = model.htest_elevated_gas(
+    geneset="example_geneset_1",
+    genes_in_geneset=["gene1", "gene2", "gene3"],
     control_size=200,
     n_jobs=8
 )
-htest_df = htest_report.htest_df() # returns N by 4 df w/ columns 'x', 'y', 'p', 'pas'
-htest_df.to_csv(...)
+htest_df = htest_report.htest_df()  # returns N by 4 df w/ columns 'x', 'y', 'p', 'gas'
+htest_df.to_csv("htest_output.csv")
 ```
 
 

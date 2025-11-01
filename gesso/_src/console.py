@@ -8,7 +8,7 @@ from pathlib import Path
 
 def make_default_logger() -> logging.Logger:
     default_logger_level = logging.INFO
-    logger = logging.Logger(name="Default SPLAT Logger")
+    logger = logging.Logger(name="Default GESSO Logger")
     logger.setLevel(default_logger_level)
     stream_handler = logging.StreamHandler(stream=sys.stdout)
     stream_handler.setLevel(default_logger_level)
@@ -105,12 +105,12 @@ def print_wrapped(
         return
 
     if level == "DEBUG":
-        base_message = bold_text("SPLAT (debug): ") + base_message
+        base_message = bold_text("GESSO (debug): ") + base_message
         print_options._log_debug(
             fill_ignore_format(base_message, width=print_options._max_line_width)
         )
     elif level == "INFO":
-        base_message = bold_text("SPLAT (info): ") + base_message
+        base_message = bold_text("GESSO (info): ") + base_message
         print_options._log_info(
             fill_ignore_format(base_message, width=print_options._max_line_width)
         )

@@ -6,14 +6,14 @@ build-backend = "hatchling.build"
 [project]
 name = "splat"
 version = "0.1.0a1"
-description = "Spatial Pathway Level Analysis Tool: spatially informed gene set expression analysis"
+description = "GESSO: Spatially Informed Gene Set Expression Analysis"
 authors = [
     {name = "Andrew Yang", email = "andrew_j_yang@brown.edu"},
     {name = "Chichun Tan", email = "chichun_tan@brown.edu"},
     {name = "Ying Ma", email = "ying_ma@brown.edu"}
 ]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = "==3.12"
 dependencies = [
     "numpy==2.3.0",
     "pandas==2.3.0",

@@ -126,7 +126,7 @@ def bulk_normalize(
     Parameters
     ----------
     x : np.ndarray
-        Arbitrary 2D matrix. In the context of SPLAT, this is the gene
+        Arbitrary 2D matrix. In the context of GESSO, this is the gene
         expression matrix. The columns are the observations and the rows are the
         genes.
 
@@ -154,8 +154,8 @@ def bulk_normalize(
 def gLPCA_sparse(
     X: np.ndarray | sparse.csr_matrix,
     L: sparse.csr_matrix,
-    pathway_name: str,
-    genes_in_pathway: list,
+    geneset_name: str,
+    genes_in_geneset: list,
     beta: float = 0,
     job_num: int | None = None,
     metagene_sign_assignment_method: Literal[
@@ -181,11 +181,11 @@ def gLPCA_sparse(
     L : sparse.csr_matrix ~ (n_obs, n_obs)
         Graph Laplacian matrix. Must already be sparse.
 
-    pathway_name : str
-        Name of the pathway.
+    geneset_name : str
+        Name of the geneset.
 
-    genes_in_pathway : list
-        List of genes in the pathway.
+    genes_in_geneset : list
+        List of genes in the geneset.
 
     beta : float
         Must be in interval [0, 1].
@@ -195,9 +195,9 @@ def gLPCA_sparse(
 
     metagene_sign_assignment_method : Literal["none", "sign_max_abs", \
         "most_frequent_sign_weights", "most_frequent_sign_corrs"]
-        Default: "sign_overall_expression_proxy". As with all PCA/SVD-based methods, SPLAT suffers 
+        Default: "sign_overall_expression_proxy". As with all PCA/SVD-based methods, GESSO suffers 
         from a sign ambiguity problem. This parameter sets the heuristics-based 
-        method to determine the sign of the metagene weights. The pathway 
+        method to determine the sign of the metagene weights. The geneset 
         activity scores are modified accordingly.
         Options:
         - "none": None.
@@ -205,12 +205,12 @@ def gLPCA_sparse(
         - "most_frequent_sign_weights": Multiplies the metagene by the most frequent
             sign of all metagene weights.
         - "most_frequent_sign_corrs": Computes the Pearson correlation between 
-            the pathway activity scores and the gene expression for all genes 
-            in the pathway. Multiplies the metagene by the most frequent sign of 
+            the geneset activity scores and the gene expression for all genes 
+            in the geneset. Multiplies the metagene by the most frequent sign of 
             all resulting Pearson correlation coefficients.
         - "sign_overall_expression_proxy": Computes the Pearson correlation
-            between the pathway activity scores and the overall expression of
-            all genes in the pathway. Multiplies the metagene by the most frequent
+            between the geneset activity scores and the overall expression of
+            all genes in the geneset. Multiplies the metagene by the most frequent
             sign of the resulting Pearson correlation coefficients.
 
     verbose : bool
@@ -222,13 +222,13 @@ def gLPCA_sparse(
         1D metagene vector (optimal U vector).
 
     np.ndarray ~ (n_obs)
-        1D pathway activity score vector (optimal V vector).
+        1D geneset activity score vector (optimal V vector).
 
     str
-        Name of the pathway.
+        Name of the geneset.
 
     list[str]
-        List of genes in the pathway.
+        List of genes in the geneset.
     """
     if isinstance(X, np.ndarray):
         X = sparse.csr_matrix(X)
@@ -244,7 +244,7 @@ def gLPCA_sparse(
     n = X.shape[1]
     G = X.T @ X
     print_wrapped(
-        f"(Job {job_num}: {pathway_name}) " "Computed gram matrix",
+        f"(Job {job_num}: {geneset_name}) " "Computed gram matrix",
         "DEBUG",
         verbose=verbose,
     )
@@ -256,7 +256,7 @@ def gLPCA_sparse(
         G, k=1, return_eigenvectors=False, which="LA", v0=rng.standard_normal(n)
     )[0]
     print_wrapped(
-        f"(Job {job_num}: {pathway_name}) " "Computed lmbda", "DEBUG", verbose=verbose
+        f"(Job {job_num}: {geneset_name}) " "Computed lmbda", "DEBUG", verbose=verbose
     )
 
     ident = sparse.eye(n)
@@ -266,7 +266,7 @@ def gLPCA_sparse(
         L, k=1, return_eigenvectors=False, which="LA", v0=rng.standard_normal(n)
     )[0]
     print_wrapped(
-        f"(Job {job_num}: {pathway_name}) " "Computed xi", "DEBUG", verbose=verbose
+        f"(Job {job_num}: {geneset_name}) " "Computed xi", "DEBUG", verbose=verbose
     )
 
     G_beta = (1 - beta) * psd_temp + beta * (L / xi + ident / n)
@@ -275,7 +275,7 @@ def gLPCA_sparse(
         G_beta, k=1, which="SA", v0=rng.standard_normal(n)
     )
     print_wrapped(
-        f"(Job {job_num}: {pathway_name}) " "Computed eigenpair",
+        f"(Job {job_num}: {geneset_name}) " "Computed eigenpair",
         "DEBUG",
         verbose=verbose,
     )
@@ -302,19 +302,19 @@ def gLPCA_sparse(
 
     if job_num is not None:
         print_wrapped(
-            f"(Job {job_num}: {pathway_name}) "
-            f"Activity score computation for {pathway_name} completed "
+            f"(Job {job_num}: {geneset_name}) "
+            f"Activity score computation for {geneset_name} completed "
             f"in {seconds} seconds.",
             verbose=verbose,
         )
     else:
         print_wrapped(
-            f"Activity score computation for pathway {pathway_name} "
+            f"Activity score computation for geneset {geneset_name} "
             f"completed in {seconds} seconds.",
             verbose=verbose,
         )
 
-    return u_optimal, v_optimal, pathway_name, genes_in_pathway
+    return u_optimal, v_optimal, geneset_name, genes_in_geneset
 
 
 def check_partition_correctness(partition: list[pd.Index], df: pd.DataFrame) -> bool:

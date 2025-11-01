@@ -6,7 +6,7 @@ import numpy as np
 from joblib import Parallel, delayed
 from typing import Literal
 from .console import print_wrapped
-from .interactive import PathwayActivityScoresReport, PermutationTestReport
+from .interactive import GeneSetActivityScoresReport, PermutationTestReport
 from .computation import (
     bulk_standard_scale,
     bulk_normalize,
@@ -16,26 +16,26 @@ from .computation import (
 )
 
 
-class SPLAT:
-    """A SPLAT model for spatially informed gene set expression analysis.
-    SPLAT stands for Spatial Pathway Level Analysis Tool.
+class GESSO:
+    """GESSO (Gene sEt activity Score analysis with Spatial lOcation)
+    is a model for spatially informed gene set expression analysis.
     """
 
     def __init__(
         self,
         expression_df: pd.DataFrame,
         locations_df: pd.DataFrame,
-        pathways_df: pd.DataFrame | None = None,
+        genesets_df: pd.DataFrame | None = None,
         k: int = 6,
         normalize_counts_method: Literal[
             "normalize", "normalize-log1p", "none"
         ] = "none",
         verbose: bool = True,
     ):
-        """Constructs a SPLAT model.
-        SPLAT stands for Spatial Pathway Level Analysis Tool.
-        SPLAT computes a pathway activity score (PAS) for each spatial
-        location/spot in the provided expression data.
+        """Constructs a GESSO (Gene sEt activity Score analysis with Spatial lOcation)
+        model for spatially informed gene set expression analysis. Given spatial
+        transcriptomics data and a gene set or pathway, GESSO will return
+        a gene set activity score (GAS) for each spatial location (spot).
 
         Parameters
         ----------
@@ -51,12 +51,14 @@ class SPLAT:
             The columns must be named 'x' and 'y'.
             Each row represents the location (xy coordinates) of that spot.
 
-        pathways_df : pd.DataFrame ~ (n_genes, n_pathways)
-            A DataFrame containing n_genes rows and n_pathways columns.
+        genesets_df : pd.DataFrame ~ (n_genes, n_genesets) | None
+            Default: None.
+            A DataFrame containing n_genes rows and n_genesets columns.
             The index will be interpreted as gene names.
-            The columns will be interpreted as pathway names.
+            The columns will be interpreted as geneset names.
             The values must be binary (0 or 1). Entry (i, j) is 1 if gene i is
-            in pathway j, and 0 otherwise.
+            in geneset j, and 0 otherwise.
+            If None, gene sets can be provided later during GAS computation.
 
         k : int
             Default: 6. For k-nearest neighbors construction of the
@@ -76,10 +78,10 @@ class SPLAT:
         # preprocess input data
         self._expression_df = expression_df.T.copy()
         self._locations_df = locations_df.copy()
-        if pathways_df is not None:
-            self._pathways_df = pathways_df.copy()
+        if genesets_df is not None:
+            self._genesets_df = genesets_df.copy()
         else:
-            self._pathways_df = None
+            self._genesets_df = None
 
         self._verbose = verbose
 
@@ -116,10 +118,10 @@ class SPLAT:
         self._q_cache = None
         print_wrapped("Model initialization complete.", verbose=verbose)
 
-    def compute_pas(
+    def compute_gas(
         self,
-        pathways: list[str] | None = None,
-        pathways_dict: dict[str, list[str]] | None = None,
+        genesets: list[str] | None = None,
+        genesets_dict: dict[str, list[str]] | None = None,
         beta: float = 0.33,
         compute_method: Literal["cpu", "lowres"] = "cpu",
         n_jobs: int = -1,
@@ -127,21 +129,21 @@ class SPLAT:
         partition_method: Literal["random", "stratified_kmeans"] = "stratified_kmeans",
         partition_seed: int = 42,
         store_metagenes: bool = True,
-    ) -> PathwayActivityScoresReport:
+    ) -> GeneSetActivityScoresReport:
         """
         Parameters
         ----------
-        pathways : list[str]
+        genesets : list[str]
             Default: None.
-            A list of pathway names for which the pathway activity scores should be
-            computed. If None (and pathways_dict is None),
-            computes pathway activity scores for all pathways
-            provided in the provided pathways DataFrame.
+            A list of gene set names for which the gene set activity scores (GASs)
+            should be computed. If None (and genesets_dict is None),
+            computes gene set activity scores for all genesets
+            provided in the provided genesets DataFrame.
 
-        pathways_dict : dict[str, list[str]] | None
+        genesets_dict : dict[str, list[str]] | None
             Default: None.
-            A dictionary where the keys are pathway names and the values are lists
-            of genes in the pathway. Overrides the pathways parameter.
+            A dictionary where the keys are geneset names and the values are lists
+            of genes in the geneset. Overrides the genesets parameter.
 
         beta : float
             Default: 0.33. Must be in the interval [0, 1]. Suggested beta < 0.5.
@@ -174,102 +176,104 @@ class SPLAT:
 
         Returns
         -------
-        PathwayActivityScoresReport
+        GeneSetActivityScoresReport
+            A report containing the gene set activity scores DataFrame and
+            metagene DataFrames (if store_metagenes is True).
         """
         if beta < 0 or beta > 1:
             raise ValueError('Parameter "beta" must be in interval [0, 1].')
 
-        if pathways is not None and self._pathways_df is None:
+        if genesets is not None and self._genesets_df is None:
             raise ValueError(
-                "Pathways DataFrame not provided. Cannot compute activity scores."
+                "Gene sets DataFrame not provided. Cannot compute activity scores."
             )
 
-        if pathways is None and pathways_dict is None:
-            if self._pathways_df is None:
+        if genesets is None and genesets_dict is None:
+            if self._genesets_df is None:
                 raise ValueError(
-                    "Pathways DataFrame not provided. Cannot compute activity scores."
+                    "Gene sets DataFrame not provided. Cannot compute activity scores."
                 )
 
-            pathways = self._pathways_df.columns.to_list()
+            genesets = self._genesets_df.columns.to_list()
 
-            if not isinstance(pathways, list):
-                raise ValueError('Parameter "pathways" must be a list.')
+            if not isinstance(genesets, list):
+                raise ValueError('Parameter "genesets" must be a list.')
 
-        elif pathways is None:
-            pathways = list(pathways_dict.keys())
+        elif genesets is None:
+            genesets = list(genesets_dict.keys())
 
         if n_jobs == -1:
             n_jobs = os.cpu_count()
         if n_jobs < 1:
             n_jobs = 1
-        n_jobs = min(len(pathways), n_jobs)
+        n_jobs = min(len(genesets), n_jobs)
 
         # begin computation
         if compute_method == "cpu":
             print_wrapped(
                 "Beginning activity score computation "
-                f"for {len(pathways)} pathways "
+                f"for {len(genesets)} gene sets "
                 f"with {n_jobs} jobs. "
                 f"Method used: {compute_method}.",
                 verbose=self._verbose,
             )
-            pas_df = pd.DataFrame(columns=self._expression_df.columns)
-            pathway_to_metagene_df_dict = dict()
+            gas_df = pd.DataFrame(columns=self._expression_df.columns)
+            geneset_to_metagene_df_dict = dict()
 
             L = self._laplacian
             method_f = gLPCA_sparse
 
-            def process_pathway(
-                pathway: str, genes_in_pathway: pd.Index, job_num: int
+            def process_geneset(
+                geneset: str, genes_in_geneset: pd.Index, job_num: int
             ) -> tuple[str, np.ndarray, np.ndarray, pd.Index]:
-                X: np.ndarray = self._expression_df.loc[genes_in_pathway].to_numpy()
+                X: np.ndarray = self._expression_df.loc[genes_in_geneset].to_numpy()
                 X = bulk_standard_scale(X, axis=1)
                 u, v, _, _ = method_f(
                     X=X,
                     L=L,
                     beta=beta,
-                    pathway_name=pathway,
-                    genes_in_pathway=genes_in_pathway,
+                    geneset_name=geneset,
+                    genes_in_geneset=genes_in_geneset,
                     job_num=job_num,
                     metagene_sign_assignment_method="sign_overall_expression_proxy",
                     verbose=self._verbose,
                 )
-                return pathway, v, u, genes_in_pathway
+                return geneset, v, u, genes_in_geneset
 
-            if pathways_dict is None:
+            if genesets_dict is None:
                 results = Parallel(n_jobs=n_jobs)(
-                    delayed(process_pathway)(
-                        pathway,
-                        self._pathways_df[self._pathways_df[pathway] == 1].index,
+                    delayed(process_geneset)(
+                        geneset,
+                        self._genesets_df[self._genesets_df[geneset] == 1].index,
                         i + 1,
                     )
-                    for i, pathway in enumerate(pathways)
+                    for i, geneset in enumerate(genesets)
                 )
             else:
                 results = Parallel(n_jobs=n_jobs)(
-                    delayed(process_pathway)(pathway, genes_in_pathway, i + 1)
-                    for i, (pathway, genes_in_pathway) in enumerate(
-                        pathways_dict.items()
+                    delayed(process_geneset)(geneset, genes_in_geneset, i + 1)
+                    for i, (geneset, genes_in_geneset) in enumerate(
+                        genesets_dict.items()
                     )
                 )
 
-            for pathway, v, u, genes_in_pathway in results:
-                pas_df.loc[pathway] = v
+            for geneset, v, u, genes_in_geneset in results:
+                gas_df.loc[geneset] = v
                 if store_metagenes:
-                    pathway_to_metagene_df_dict[pathway] = pd.DataFrame(
-                        u, index=genes_in_pathway, columns=[pathway]
+                    geneset_to_metagene_df_dict[geneset] = pd.DataFrame(
+                        u, index=genes_in_geneset, columns=[geneset]
                     )
 
-            return PathwayActivityScoresReport(
-                pas_df=pas_df.transpose(),
+            return GeneSetActivityScoresReport(
+                gas_df=gas_df.transpose(),
                 locations_df=self._locations_df,
-                pathway_to_metagene_df_dict=pathway_to_metagene_df_dict,
+                geneset_to_metagene_df_dict=geneset_to_metagene_df_dict,
             )
 
         elif compute_method == "lowres":
             print(
                 "Beginning low resolution activity scores computation "
-                f"for {len(pathways)} pathways "
+                f"for {len(genesets)} gene sets "
                 f"with {n_jobs} jobs. "
                 f"Method used: {compute_method}."
             )
@@ -293,16 +297,16 @@ class SPLAT:
 
             method_f = gLPCA_sparse
 
-            def process_pathway(
-                pathway: str,
-                genes_in_pathway: pd.Index,
+            def process_geneset(
+                geneset: str,
+                genes_in_geneset: pd.Index,
                 subset_index: pd.Index,
-                pathway_num: int,
+                geneset_num: int,
                 subset_num: int,
                 job_num: int,
             ) -> tuple[str, np.ndarray, np.ndarray, pd.Index, int, int]:
                 X: np.ndarray = self._expression_df.loc[
-                    genes_in_pathway, subset_index
+                    genes_in_geneset, subset_index
                 ].to_numpy()
                 local_laplacian = self._compute_laplacian_knn(
                     k=self._k, locations_df=self._locations_df.loc[subset_index]
@@ -312,45 +316,45 @@ class SPLAT:
                     X=X,
                     L=local_laplacian,
                     beta=beta,
-                    pathway_name=pathway,
-                    genes_in_pathway=genes_in_pathway,
+                    geneset_name=geneset,
+                    genes_in_geneset=genes_in_geneset,
                     job_num=job_num,
                     metagene_sign_assignment_method="sign_overall_expression_proxy",
                     verbose=self._verbose,
                 )
                 return (
-                    pathway,
+                    geneset,
                     v,
                     u,
-                    genes_in_pathway,
+                    genes_in_geneset,
                     subset_index,
-                    pathway_num,
+                    geneset_num,
                     subset_num,
                 )
 
             print_wrapped(
                 "Beginning low resolution activity score computation "
-                f"for {len(pathways)} pathways "
+                f"for {len(genesets)} gene sets "
                 f"with {n_jobs} jobs.",
                 verbose=self._verbose,
             )
 
             parallel_input_list = []
             job_num = 1
-            for pathway_num, pathway in enumerate(pathways):
-                if pathways_dict is None:
-                    genes_in_pathway = self._pathways_df[
-                        self._pathways_df[pathway] == 1
+            for geneset_num, geneset in enumerate(genesets):
+                if genesets_dict is None:
+                    genes_in_geneset = self._genesets_df[
+                        self._genesets_df[geneset] == 1
                     ].index
                 else:
-                    genes_in_pathway = pathways_dict[pathway]
+                    genes_in_geneset = genesets_dict[geneset]
                 for subset_num, subset_index in enumerate(partitioned_indices):
                     parallel_input_list.append(
                         (
-                            pathway,
-                            genes_in_pathway,
+                            geneset,
+                            genes_in_geneset,
                             subset_index,
-                            pathway_num,
+                            geneset_num,
                             subset_num,
                             job_num,
                         )
@@ -358,107 +362,107 @@ class SPLAT:
                     job_num += 1
 
             results = Parallel(n_jobs=n_jobs)(
-                delayed(process_pathway)(arg0, arg1, arg2, arg3, arg4, arg5)
+                delayed(process_geneset)(arg0, arg1, arg2, arg3, arg4, arg5)
                 for arg0, arg1, arg2, arg3, arg4, arg5 in parallel_input_list
             )
 
-            pathway_to_reference_gene_idx = {}
-            pathway_to_flip_flags = {}
-            pathway_to_flip_count = {}
-            for result_idx, (pathway, _, u, _, _, _, _) in enumerate(results):
-                if pathway not in pathway_to_reference_gene_idx:
-                    # first instance of low-res image for pathway
-                    pathway_to_reference_gene_idx[pathway] = int(np.argmax(u))
-                    pathway_to_flip_flags[pathway] = {result_idx: False}
-                    pathway_to_flip_count[pathway] = 0
+            geneset_to_reference_gene_idx = {}
+            geneset_to_flip_flags = {}
+            geneset_to_flip_count = {}
+            for result_idx, (geneset, _, u, _, _, _, _) in enumerate(results):
+                if geneset not in geneset_to_reference_gene_idx:
+                    # first instance of low-res image for geneset
+                    geneset_to_reference_gene_idx[geneset] = int(np.argmax(u))
+                    geneset_to_flip_flags[geneset] = {result_idx: False}
+                    geneset_to_flip_count[geneset] = 0
                 else:
                     median_weight = np.median(u)
                     needs_flip = (
-                        u[pathway_to_reference_gene_idx[pathway]] < median_weight
+                        u[geneset_to_reference_gene_idx[geneset]] < median_weight
                     )
-                    pathway_to_flip_flags[pathway][result_idx] = needs_flip
-                    pathway_to_flip_count[pathway] += int(needs_flip)
+                    geneset_to_flip_flags[geneset][result_idx] = needs_flip
+                    geneset_to_flip_count[geneset] += int(needs_flip)
 
-            pathway_to_flip_majority = {}
-            for pathway in pathway_to_flip_flags.keys():
-                pathway_to_flip_majority[pathway] = (
-                    pathway_to_flip_count[pathway]
-                    > len(pathway_to_flip_flags[pathway]) / 2
+            geneset_to_flip_majority = {}
+            for geneset in geneset_to_flip_flags.keys():
+                geneset_to_flip_majority[geneset] = (
+                    geneset_to_flip_count[geneset]
+                    > len(geneset_to_flip_flags[geneset]) / 2
                 )
 
-            pas_updates = []
+            gas_updates = []
             if store_metagenes:
-                pathway_to_metagene_list_dict = {p: [] for p in pathways}
+                geneset_to_metagene_list_dict = {g: [] for g in genesets}
 
-            for result_idx, (pathway, v, u, _, subset_index, _, _) in enumerate(
+            for result_idx, (geneset, v, u, _, subset_index, _, _) in enumerate(
                 results
             ):
-                flip = pathway_to_flip_flags[pathway][result_idx]
-                do_flip = pathway_to_flip_majority[pathway] ^ flip  # flip if needed
+                flip = geneset_to_flip_flags[geneset][result_idx]
+                do_flip = geneset_to_flip_majority[geneset] ^ flip  # flip if needed
 
                 v_final = -v if do_flip else v
                 u_final = -u if do_flip else u
 
-                pas_updates.append((pathway, subset_index, v_final))
+                gas_updates.append((geneset, subset_index, v_final))
                 if store_metagenes:
-                    pathway_to_metagene_list_dict[pathway].append(u_final)
+                    geneset_to_metagene_list_dict[geneset].append(u_final)
 
-            pas_df = pd.DataFrame(
-                np.nan, index=pathways, columns=self._expression_df.columns
+            gas_df = pd.DataFrame(
+                np.nan, index=genesets, columns=self._expression_df.columns
             )
-            # update PAS DataFrame
-            for pathway, subset_index, v in pas_updates:
-                pas_df.loc[pathway, subset_index] = v
+            # update GAS DataFrame
+            for geneset, subset_index, v in gas_updates:
+                gas_df.loc[geneset, subset_index] = v
 
             # average metagene values across subsets
-            pathway_to_metagene_df_dict = {}
+            geneset_to_metagene_df_dict = {}
             if store_metagenes:
-                for pathway, metagenes in pathway_to_metagene_list_dict.items():
-                    genes_in_pathway = (
-                        pathways_dict[pathway]
-                        if pathways_dict is not None
-                        else self._pathways_df[self._pathways_df[pathway] == 1].index
+                for geneset, metagenes in geneset_to_metagene_list_dict.items():
+                    genes_in_geneset = (
+                        genesets_dict[geneset]
+                        if genesets_dict is not None
+                        else self._genesets_df[self._genesets_df[geneset] == 1].index
                     )
                     metagene_average = np.mean(metagenes, axis=0)
-                    pathway_to_metagene_df_dict[pathway] = pd.DataFrame(
-                        metagene_average, index=genes_in_pathway, columns=[pathway]
+                    geneset_to_metagene_df_dict[geneset] = pd.DataFrame(
+                        metagene_average, index=genes_in_geneset, columns=[geneset]
                     )
 
-            return PathwayActivityScoresReport(
-                pas_df=pas_df.transpose(),
+            return GeneSetActivityScoresReport(
+                gas_df=gas_df.transpose(),
                 locations_df=self._locations_df,
-                pathway_to_metagene_df_dict=pathway_to_metagene_df_dict,
+                geneset_to_metagene_df_dict=geneset_to_metagene_df_dict,
             )
 
         else:
             raise ValueError("Invalid input for parameter 'compute_method'.")
 
-    def htest_elevated_pas(
+    def htest_elevated_gas(
         self,
-        pathway: str | None = None,
-        genes_in_pathway: list[str] | None = None,
+        geneset: str | None = None,
+        genes_in_geneset: list[str] | None = None,
         beta: float = 0.33,
         n_permutations: int = 500,
         seed: int = 42,
         n_jobs: int = -1,
     ) -> PermutationTestReport:
         """Conducts a permutation test at each spot to systematically identify
-        spots with significantly elevated pathway activity.
+        spots with significantly elevated gene set activity.
 
-        The null hypothesis is that the pathway activity score
+        The null hypothesis is that the gene set activity score
         at each spot is not significantly different from the
         activity score of a randomly sampled set of genes
-        of the same size as the pathway.
+        of the same size as the geneset.
 
         Parameters
         ----------
-        pathway : str | None
-            Default: None. Name of the pathway to test. If None, genes_in_pathway must
+        geneset : str | None
+            Default: None. Name of the gene set to test. If None, genes_in_geneset must
             be provided.
 
-        genes_in_pathway : list[str] | None
-            Default: None. List of genes in the pathway to test. If None, pathway must
-            be provided. Overrides pathway if not None.
+        genes_in_geneset : list[str] | None
+            Default: None. List of genes in the gene set to test. If None, geneset must
+            be provided. Overrides geneset if not None.
 
         beta : float
             Default: 0.33. Must be in the interval [0, 1]. Suggested beta < 0.5.
@@ -475,51 +479,50 @@ class SPLAT:
         Returns
         -------
         PermutationTestReport
-            A report containing the pathway activity scores and p-values for each spot.
+            A report containing the gene set activity scores and p-values for each spot.
         """
-        if pathway is None and genes_in_pathway is None:
-            raise ValueError("Both 'pathway' and 'genes_in_pathway' cannot be None.")
+        if geneset is None and genes_in_geneset is None:
+            raise ValueError("Both 'geneset' and 'genes_in_geneset' cannot be None.")
 
         all_genes = sorted(self._expression_df.index.to_list())
 
-        if pathway is not None:
-            if genes_in_pathway is None:
-                genes_in_pathway = self._pathways_df[
-                    self._pathways_df[pathway] == 1
+        if geneset is not None:
+            if genes_in_geneset is None:
+                genes_in_geneset = self._genesets_df[
+                    self._genesets_df[geneset] == 1
                 ].index.to_list()
-                pathway_name = pathway
-            # if both pathway and genes_in_pathway are provided,
-            # we use genes_in_pathway, but keep the pathway as pathway name.
-            pathway_name = pathway
+                geneset_name = geneset
+            # if both geneset and genes_in_geneset are provided,
+            # we use genes_in_geneset, but keep the geneset as geneset name.
+            geneset_name = geneset
 
         else:
-            if genes_in_pathway is None:
+            if genes_in_geneset is None:
                 raise ValueError(
-                    "If 'pathway' is None, 'genes_in_pathway' must be provided."
+                    "If 'geneset' is None, 'genes_in_geneset' must be provided."
                 )
-            pathway_name = "USER_DEFINED"
-
-        pathways_dict = {pathway_name: genes_in_pathway}
+            geneset_name = "USER_DEFINED"
+        genesets_dict = {geneset_name: genes_in_geneset}
 
         # initialize an rng
         rng = np.random.default_rng(seed)
 
         null_geneset_names = []
         for i in range(n_permutations):
-            null_genes = rng.choice(all_genes, len(genes_in_pathway), replace=False)
-            random_pathway_name = f"random_geneset_{i}"
-            pathways_dict[random_pathway_name] = null_genes
-            null_geneset_names.append(random_pathway_name)
+            null_genes = rng.choice(all_genes, len(genes_in_geneset), replace=False)
+            random_geneset_name = f"random_geneset_{i}"
+            genesets_dict[random_geneset_name] = null_genes
+            null_geneset_names.append(random_geneset_name)
 
-        activity_scores_df = self.compute_pas(
-            pathways_dict=pathways_dict, beta=beta, n_jobs=n_jobs
-        ).pas_df()
+        activity_scores_df = self.compute_gas(
+            genesets_dict=genesets_dict, beta=beta, n_jobs=n_jobs
+        ).gas_df()
 
         location_index = self._locations_df.index
         # reindex by location index to ensure alignment
         activity_scores_df = activity_scores_df.loc[location_index]
 
-        p_cap = activity_scores_df[pathway_name].to_numpy()
+        p_cap = activity_scores_df[geneset_name].to_numpy()
         p_matrix = activity_scores_df[null_geneset_names].to_numpy().T
         prob_greater = np.sum(p_matrix > p_cap, axis=0) / len(p_matrix)
         p_vals = prob_greater
@@ -527,12 +530,12 @@ class SPLAT:
             pd.DataFrame({"p": p_vals}, index=self._locations_df.index)
         )
         # since we already reindexed activity_scores_df by location_index,
-        # we can safely assign the pathway activity scores directly
-        permutation_test_df["pas"] = activity_scores_df[pathway_name].to_numpy()
+        # we can safely assign the geneset activity scores directly
+        permutation_test_df["gas"] = activity_scores_df[geneset_name].to_numpy()
         # reorder columns to match expected output
-        permutation_test_df = permutation_test_df[["x", "y", "pas", "p"]]
+        permutation_test_df = permutation_test_df[["x", "y", "gas", "p"]]
         return PermutationTestReport(
-            pathway=pathway_name,
+            geneset=geneset_name,
             permutation_test_df=permutation_test_df,
         )
 
@@ -587,27 +590,27 @@ class SPLAT:
 
     def _verify_gene_match(self):
         """Checks that all genes match (i.e., indices of
-        self._gene_expression_df and self._gene_pathway_df are equivalent).
+        self._gene_expression_df and self._genesets_df are equivalent).
         Should be called after preprocessing.
         """
-        if self._pathways_df is None:
+        if self._genesets_df is None:
             return
 
         if len(self._expression_df) == 0:
             raise ValueError(
                 "No genes remain after preprocessing. "
                 "Please ensure gene IDs match in gene_expression_df "
-                "and gene_pathway_df."
+                "and genesets_df."
             )
 
         expression_indices = self._expression_df.index
-        pathway_indices = self._pathways_df.index
-        if len(expression_indices) != len(pathway_indices):
+        geneset_indices = self._genesets_df.index
+        if len(expression_indices) != len(geneset_indices):
             raise ValueError(
                 "Number of genes in expression_df doesn't match "
-                "number of genes in pathways_df"
+                "number of genes in genesets_df"
             )
-        if np.array_equal(expression_indices.values, pathway_indices.values):
+        if np.array_equal(expression_indices.values, geneset_indices.values):
             return
 
         def check_match(idx_1, idx_2):
@@ -617,7 +620,7 @@ class SPLAT:
 
         results = Parallel(n_jobs=-1)(
             delayed(check_match)(idx1, idx2)
-            for idx1, idx2 in zip(expression_indices, pathway_indices)
+            for idx1, idx2 in zip(expression_indices, geneset_indices)
         )
         mismatches = [result for result in results if result is not None]
 
@@ -657,34 +660,34 @@ class SPLAT:
                 + ", ".join(mismatches)
             )
 
-    def _verify_pathways(self, pathways: list[str]):
-        """Checks that all pathways of interest actually exist in
-        self._gene_pathway_df.
+    def _verify_genesets(self, genesets: list[str]):
+        """Checks that all genesets of interest actually exist in
+        self._genesets_df.
 
         Parameters
         ----------
-        pathways : list[str]
+        genesets : list[str]
         """
-        pathway_set = set(self._pathways_df.index)
+        geneset_set = set(self._genesets_df.index)
 
         # Use numpy for a quick check
-        if np.all(np.isin(pathways, list(pathway_set))):
+        if np.all(np.isin(genesets, list(geneset_set))):
             return
 
-        def check_pathway(pathway):
-            if pathway not in pathway_set:
-                return pathway
+        def check_geneset(geneset):
+            if geneset not in geneset_set:
+                return geneset
             return None
 
         results = Parallel(n_jobs=-1)(
-            delayed(check_pathway)(pathway) for pathway in pathways
+            delayed(check_geneset)(geneset) for geneset in genesets
         )
-        missing_pathways = [result for result in results if result is not None]
+        missing_genesets = [result for result in results if result is not None]
 
-        if missing_pathways:
+        if missing_genesets:
             raise ValueError(
-                "Query pathway(s) not in input pathway df: "
-                f"{', '.join(missing_pathways)}"
+                "Query gene set(s) not in input geneset df: "
+                f"{', '.join(missing_genesets)}"
             )
 
     def _verify_locations_df(self):
@@ -715,10 +718,10 @@ class SPLAT:
 
     def _force_common_genes(self):
         """
-        Finds the common subset of genes. Then, indexes the pathway and
+        Finds the common subset of genes. Then, indexes the gene set and
         expression dataframes to only include the common genes.
         """
-        if self._pathways_df is None:
+        if self._genesets_df is None:
             return
 
         def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
@@ -729,13 +732,13 @@ class SPLAT:
             return df
 
         self._expression_df = process_dataframe(self._expression_df)
-        self._pathways_df = process_dataframe(self._pathways_df)
+        self._genesets_df = process_dataframe(self._genesets_df)
 
-        genes_pathway_df = set(self._pathways_df.index)
+        genes_geneset_df = set(self._genesets_df.index)
         genes_expression_df = set(self._expression_df.index)
-        common_genes = genes_pathway_df.intersection(genes_expression_df)
+        common_genes = genes_geneset_df.intersection(genes_expression_df)
 
-        n_genes_removed_pathway = len(genes_pathway_df - common_genes)
+        n_genes_removed_geneset = len(genes_geneset_df - common_genes)
         n_genes_removed_expression = len(genes_expression_df - common_genes)
 
         def print_removal_info(n_removed: int, data_type: str):
@@ -746,17 +749,17 @@ class SPLAT:
                     verbose=self._verbose,
                 )
 
-        print_removal_info(n_genes_removed_pathway, "expression")
-        print_removal_info(n_genes_removed_expression, "pathway")
+        print_removal_info(n_genes_removed_geneset, "geneset")
+        print_removal_info(n_genes_removed_expression, "expression")
 
         print_wrapped(
-            f"Identified {len(common_genes)} common genes in the pathway "
+            f"Identified {len(common_genes)} common genes in the gene set "
             "and expression data.",
             verbose=self._verbose,
         )
 
         common_genes = list(common_genes)
-        self._pathways_df = self._pathways_df.loc[common_genes]
+        self._genesets_df = self._genesets_df.loc[common_genes]
         self._expression_df = self._expression_df.loc[common_genes]
 
     def _force_common_cellid(self):

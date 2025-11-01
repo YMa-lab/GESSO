@@ -6,48 +6,48 @@ import pandas as pd
 from typing import Literal, Any
 
 
-class PathwayActivityScoresReport:
-    """Report object for storing SPLAT pathway activity score results."""
+class GeneSetActivityScoresReport:
+    """Report object for storing GESSO geneset activity score results."""
 
     def __init__(
         self,
-        pas_df: pd.DataFrame,
+        gas_df: pd.DataFrame,
         locations_df: pd.DataFrame,
-        pathway_to_metagene_df_dict: dict,
+        geneset_to_metagene_df_dict: dict,
     ) -> None:
-        """Initializes the PathwayActivityScoresReport object.
+        """Initializes the GeneSetActivityScoresReport object.
 
         Parameters
         ----------
-        pas_df : pd.DataFrame
-            Pathway activity scores DataFrame. Should be of size (n_obs, n_pathways).
+        gas_df : pd.DataFrame
+            geneset activity scores DataFrame. Should be of size (n_obs, n_genesets).
 
         location_df : pd.DataFrame
             Locations DataFrame. Should be of size (n_obs, 2).
 
-        pathway_to_metagene_df_dict: dict
-            Dictionary of pathway to metagene DataFrames.
+        geneset_to_metagene_df_dict: dict
+            Dictionary of geneset to metagene DataFrames.
         """
-        self._pas_df = pas_df
+        self._gas_df = gas_df
         self._location_df = locations_df
         self._orig_spot_order = locations_df.index
-        self._pathway_to_metagene_df_dict: dict[str, pd.DataFrame] = (
-            pathway_to_metagene_df_dict
+        self._geneset_to_metagene_df_dict: dict[str, pd.DataFrame] = (
+            geneset_to_metagene_df_dict
         )
-        self._n_examples, self._n_pathways = pas_df.shape
+        self._n_examples, self._n_genesets = gas_df.shape
 
     def metagene_df(
         self,
-        pathway: str,
+        geneset: str,
         sort_by: Literal["metagene_weight", "gene_name"] = "metagene_weight",
     ) -> pd.DataFrame:
-        """Returns a metagene DataFrame with a single column (pathway name).
+        """Returns a metagene DataFrame with a single column (geneset name).
         The index is the gene name.
 
         Parameters
         ----------
-        pathway : str
-            Pathway name.
+        geneset : str
+            geneset name.
 
         sort_by : Literal["metagene_weight", "gene_name"]
             Default: "metagene_weight". How to sort the DataFrame.
@@ -58,9 +58,9 @@ class PathwayActivityScoresReport:
         -------
         pd.DataFrame
         """
-        output = self._pathway_to_metagene_df_dict[pathway]
+        output = self._geneset_to_metagene_df_dict[geneset]
         if sort_by == "metagene_weight":
-            output = output.sort_values(by=pathway, ascending=False)
+            output = output.sort_values(by=geneset, ascending=False)
         elif sort_by == "gene_name":
             # the gene name is in the index
             output = output.sort_index(ascending=True)
@@ -81,32 +81,32 @@ class PathwayActivityScoresReport:
         """
         return self._location_df[["x", "y"]]
 
-    def pas_df(self) -> pd.DataFrame:
-        """Returns the pathway activity scores as a DataFrame.
-        The index is the spot ID. The columns are the pathway names.
+    def gas_df(self) -> pd.DataFrame:
+        """Returns the geneset activity scores as a DataFrame.
+        The index is the spot ID. The columns are the geneset names.
 
         Returns
         -------
         pd.DataFrame
         """
-        return self._pas_df.loc[self._orig_spot_order]
+        return self._gas_df.loc[self._orig_spot_order]
 
-    def plot_pas_spatial_map(
+    def plot_gas_spatial_map(
         self,
-        pathway: str,
+        geneset: str,
         size: int = 20,
         cmap: Colormap | str = "viridis",
         show_coords: bool = False,
         figsize: tuple[float, float] = (5.0, 5.0),
         ax: Axes | None = None,
     ) -> Figure:
-        """Plots the pathway activity scores of a given pathway of interest
+        """Plots the geneset activity scores of a given geneset of interest
         across all locations.
 
         Parameters
         ----------
-        pathway : str
-            The name of the pathway to plot.
+        geneset : str
+            The name of the geneset to plot.
 
         size : int
             Default: 20. The size of the scatter points.
@@ -129,8 +129,8 @@ class PathwayActivityScoresReport:
             fig, ax = plt.subplots(figsize=figsize)
         else:
             fig = ax.get_figure()
-        plotting_df = self._location_df.join(self._pas_df[pathway])
-        cdata = plotting_df[pathway].to_numpy()
+        plotting_df = self._location_df.join(self._gas_df[geneset])
+        cdata = plotting_df[geneset].to_numpy()
         scatter = ax.scatter(
             x=plotting_df["x"].to_numpy(),
             y=plotting_df["y"].to_numpy(),
@@ -148,35 +148,35 @@ class PathwayActivityScoresReport:
                 spine.set_visible(False)
 
         fig.colorbar(scatter, ax=ax, fraction=0.02, pad=0.01)
-        ax.set_title(f"SPLAT: Pathway Activity Scores")
+        ax.set_title(f"GESSO Gene Set Activity Scores")
         fig.tight_layout()
         plt.close(fig)
         return fig
 
 
 class PermutationTestReport:
-    """Report object for storing SPLAT permutation test results."""
+    """Report object for storing GESSO permutation test results."""
 
     def __init__(
         self,
-        pathway: str,
+        geneset: str,
         permutation_test_df: pd.DataFrame,
     ):
         """Initializes the PermutationTestReport object.
 
         Parameters
         ----------
-        pathway : str
-            The name of the pathway for which the permutation test was performed.
+        geneset : str
+            The name of the geneset for which the permutation test was performed.
 
         permuation_test_df : pd.DataFrame
             DataFrame containing the results of the permutation test.
-            Should have columns: 'x', 'y', 'pas', 'p'
+            Should have columns: 'x', 'y', 'gas', 'p'
         """
-        self._pathway = pathway
+        self._geneset = geneset
         self._permutation_test_df = permutation_test_df
 
-    def plot_pas_spatial_map(
+    def plot_gas_spatial_map(
         self,
         size: int = 20,
         cmap: Colormap | str = "viridis",
@@ -184,7 +184,8 @@ class PermutationTestReport:
         figsize: tuple[float, float] = (5.0, 5.0),
         ax: Axes | None = None,
     ) -> Figure:
-        """Plots the pathway activity scores of the permutation test across all locations.
+        """Plots the gene set activity scores of the permutation
+        test across all locations.
 
         Parameters
         ----------
@@ -211,7 +212,7 @@ class PermutationTestReport:
             fig = ax.get_figure()
         plotting_df = self._permutation_test_df
 
-        cdata = plotting_df[self._pathway].to_numpy()
+        cdata = plotting_df[self._geneset].to_numpy()
         scatter = ax.scatter(
             x=plotting_df["x"],
             y=plotting_df["y"],
@@ -229,7 +230,7 @@ class PermutationTestReport:
                 spine.set_visible(False)
 
         fig.colorbar(scatter, ax=ax, fraction=0.02, pad=0.01)
-        ax.set_title(f"SPLAT: Permutation Test Results for {self._pathway}")
+        ax.set_title(f"GESSO: Permutation Test Results for {self._geneset}")
         fig.tight_layout()
         plt.close(fig)
         return fig
@@ -285,7 +286,7 @@ class PermutationTestReport:
             c=colors,
             s=size,
         )
-        ax.set_title(f"SPLAT: Spots with Elevated Activity")
+        ax.set_title(f"GESSO: Spots with Elevated Activity")
 
         if not show_coords:
             ax.set_xticks([])
@@ -298,15 +299,15 @@ class PermutationTestReport:
         plt.close(fig)
         return fig
 
-    def pas_df(self) -> pd.DataFrame:
-        """Returns the pathway activity scores DataFrame.
+    def gas_df(self) -> pd.DataFrame:
+        """Returns the geneset activity scores DataFrame.
 
         Returns
         -------
         pd.DataFrame
-            DataFrame containing the pathway activity scores.
+            DataFrame containing the geneset activity scores.
         """
-        return self._permutation_test_df[["pas"]].rename(columns={"pas": self._pathway})
+        return self._permutation_test_df[["gas"]].rename(columns={"gas": self._geneset})
 
     def pval_df(self) -> pd.DataFrame:
         """Returns the p-values DataFrame.
@@ -336,6 +337,6 @@ class PermutationTestReport:
         -------
         pd.DataFrame
             DataFrame containing the full permutation test results.
-            Contains four columns: 'x', 'y', 'pas', 'p'.
+            Contains four columns: 'x', 'y', 'gas', 'p'.
         """
         return self._permutation_test_df

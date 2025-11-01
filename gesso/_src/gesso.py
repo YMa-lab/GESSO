@@ -5,6 +5,7 @@ import scipy.sparse as sparse
 import numpy as np
 from joblib import Parallel, delayed
 from typing import Literal
+import random
 from .console import print_wrapped
 from .interactive import GeneSetActivityScoresReport, PermutationTestReport
 from .computation import (
@@ -505,12 +506,13 @@ class GESSO:
         genesets_dict = {geneset_name: genes_in_geneset}
 
         # initialize an rng
-        rng = np.random.default_rng(seed)
+        random.seed(seed)
 
         null_geneset_names = []
         for i in range(n_permutations):
-            null_genes = rng.choice(all_genes, len(genes_in_geneset), replace=False)
-            random_geneset_name = f"random_geneset_{i}"
+            null_genes = random.sample(all_genes, len(genes_in_geneset))
+            random_geneset_name = f"random_geneset_{i+1}"
+
             genesets_dict[random_geneset_name] = null_genes
             null_geneset_names.append(random_geneset_name)
 
@@ -725,27 +727,25 @@ class GESSO:
             return
 
         def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-            # 1) drop any duplicate index values, keeping the first
             df = df[~df.index.duplicated(keep="first")]
-            # 2) remove the index name so reset_index()/to_csv() etc. won’t show it
             df.index.name = None
             return df
 
         self._expression_df = process_dataframe(self._expression_df)
         self._genesets_df = process_dataframe(self._genesets_df)
 
-        genes_geneset_df = set(self._genesets_df.index)
-        genes_expression_df = set(self._expression_df.index)
-        common_genes = sorted(list(genes_geneset_df.intersection(genes_expression_df)))
+        genes_geneset_set = set(self._genesets_df.index)
+        genes_expression_set = set(self._expression_df.index)
 
-        n_genes_removed_geneset = len(genes_geneset_df - common_genes)
-        n_genes_removed_expression = len(genes_expression_df - common_genes)
+        common_genes_set = genes_geneset_set.intersection(genes_expression_set)
+        n_genes_removed_geneset = len(genes_geneset_set - common_genes_set)
+        n_genes_removed_expression = len(genes_expression_set - common_genes_set)
 
         def print_removal_info(n_removed: int, data_type: str):
             if n_removed > 0:
                 print_wrapped(
                     f"Removed {n_removed} genes not found in {data_type} data. "
-                    f"{len(common_genes)} genes remain.",
+                    f"{len(common_genes_set)} genes remain.",
                     verbose=self._verbose,
                 )
 
@@ -753,14 +753,19 @@ class GESSO:
         print_removal_info(n_genes_removed_expression, "expression")
 
         print_wrapped(
-            f"Identified {len(common_genes)} common genes in the gene set "
+            f"Identified {len(common_genes_set)} common genes in the gene set "
             "and expression data.",
             verbose=self._verbose,
         )
+        original_expression_order = self._expression_df.index
+        common_genes_list = [
+            gene_id
+            for gene_id in original_expression_order
+            if gene_id in common_genes_set
+        ]
 
-        common_genes = sorted(list(common_genes))
-        self._genesets_df = self._genesets_df.loc[common_genes]
-        self._expression_df = self._expression_df.loc[common_genes]
+        self._genesets_df = self._genesets_df.loc[common_genes_list]
+        self._expression_df = self._expression_df.loc[common_genes_list]
 
     def _force_common_cellid(self):
         """
@@ -768,22 +773,17 @@ class GESSO:
         expression dataframes. Then, indexes the location and
         expression dataframes to only include the intersection of their indices.
         """
-
-        def get_obs_set(df, attr: str) -> set[str]:
-            return set(getattr(df, attr))
-
-        obs_locations_df = get_obs_set(self._locations_df, "index")
-        obs_expression_df = get_obs_set(self._expression_df, "columns")
-        common_spots = sorted(list(obs_locations_df.intersection(obs_expression_df)))
-
-        n_spots_removed_location = len(obs_locations_df - common_spots)
-        n_spots_removed_expression = len(obs_expression_df - common_spots)
+        obs_locations_set = set(self._locations_df.index)
+        obs_expression_set = set(self._expression_df.columns)
+        common_spots_set = obs_locations_set.intersection(obs_expression_set)
+        n_spots_removed_location = len(obs_locations_set - common_spots_set)
+        n_spots_removed_expression = len(obs_expression_set - common_spots_set)
 
         def print_removal_info(n_removed: int, data_type: str):
             if n_removed > 0:
                 print_wrapped(
                     f"Removed {n_removed} spots not found in {data_type} data. "
-                    f"{len(common_spots)} spots remain.",
+                    f"{len(common_spots_set)} spots remain.",
                     verbose=self._verbose,
                 )
 
@@ -791,11 +791,13 @@ class GESSO:
         print_removal_info(n_spots_removed_expression, "location")
 
         print_wrapped(
-            f"Identified {len(common_spots)} common spots in the location "
+            f"Identified {len(common_spots_set)} common spots in the location "
             "and expression data.",
             verbose=self._verbose,
         )
-
-        common_spots_list: list[str] = list(common_spots)
+        original_loc_order = self._locations_df.index
+        common_spots_list = [
+            spot_id for spot_id in original_loc_order if spot_id in common_spots_set
+        ]
         self._locations_df = self._locations_df.loc[common_spots_list]
         self._expression_df = self._expression_df[common_spots_list]

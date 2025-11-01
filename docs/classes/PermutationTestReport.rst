@@ -1,17 +1,18 @@
 PermutationTestReport :py:mod:`(splat.PermutationTestReport)`
 =============================================================
 
-.. currentmodule:: splat
+.. currentmodule:: gesso
 
-`PermutationTestReport` is a class that encapsulates the results of SPLAT's permutation-based
-hypothesis test for identifying spots with significantly elevated pathway activity scores (PAS).
+`PermutationTestReport` is a class that encapsulates the results of GESSO's permutation-based
+hypothesis test for identifying spots with significantly elevated 
+gene set activity scores (GASs).
 
-.. autoclass:: splat.PermutationTestReport
+.. autoclass:: gesso.PermutationTestReport
     :members:
         htest_df,
-        pas_df,
+        gas_df,
         pval_df,
         locations_df,
-        plot_pas_spatial_map,
+        plot_gas_spatial_map,
         plot_pval_spatial_map
 

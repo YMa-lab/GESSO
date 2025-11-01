@@ -1,15 +1,14 @@
-SPLAT
+GESSO
 =====
-SPLAT (Spatial Pathway level Analysis Tool) is a Python package 
-for quantifying the expression level of gene sets/pathways.
-SPLAT is designed for spatial transcriptomics data.
+GESSO (Gene sEt activity Score analysis with Spatial lOcation) is a Python package 
+for spatially informed gene set expression analysis.
 
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
    
    intro
-   splat_demo.ipynb
+   gesso_demo.ipynb
    api_reference
 
 

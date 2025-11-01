@@ -1,4 +1,4 @@
-# GESSO: Gene Set Expression Quantification for Spatial Transcriptomics Data
+# GESSO: Spatially Informed Gene Set Expression Analysis
 
 GESSO (Gene sEt activity Score analysis with Spatial lOcation) is a computational method for 
 quantifying the overall expression of gene sets/pathways.

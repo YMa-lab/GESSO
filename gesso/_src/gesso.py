@@ -736,7 +736,7 @@ class GESSO:
 
         genes_geneset_df = set(self._genesets_df.index)
         genes_expression_df = set(self._expression_df.index)
-        common_genes = genes_geneset_df.intersection(genes_expression_df)
+        common_genes = sorted(list(genes_geneset_df.intersection(genes_expression_df)))
 
         n_genes_removed_geneset = len(genes_geneset_df - common_genes)
         n_genes_removed_expression = len(genes_expression_df - common_genes)
@@ -758,7 +758,7 @@ class GESSO:
             verbose=self._verbose,
         )
 
-        common_genes = list(common_genes)
+        common_genes = sorted(list(common_genes))
         self._genesets_df = self._genesets_df.loc[common_genes]
         self._expression_df = self._expression_df.loc[common_genes]
 
@@ -774,7 +774,7 @@ class GESSO:
 
         obs_locations_df = get_obs_set(self._locations_df, "index")
         obs_expression_df = get_obs_set(self._expression_df, "columns")
-        common_spots = obs_locations_df.intersection(obs_expression_df)
+        common_spots = sorted(list(obs_locations_df.intersection(obs_expression_df)))
 
         n_spots_removed_location = len(obs_locations_df - common_spots)
         n_spots_removed_expression = len(obs_expression_df - common_spots)

@@ -6,7 +6,13 @@ quantifying the overall expression of gene sets/pathways.
 This repository is the official Python implementation of GESSO.
 
 ### Installation
-We recommend installing GESSO in a new Python environment.
+We recommend installing GESSO in a new Python environment. You can create a new Python environment through [conda](https://www.anaconda.com/docs/getting-started/miniconda/main):
+```bash
+conda create -n gesso python=3.12 -y
+conda activate gesso
+```
+
+GESSO requires Python version 3.12. The following script installs GESSO into your Python environment:
 ```bash
 git clone https://github.com/YMa-Lab/GESSO.git
 cd gesso

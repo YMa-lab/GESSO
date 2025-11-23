@@ -1,7 +1,7 @@
-# GESSO: Spatially Informed Gene Set Expression Analysis
+# GESSO: Spatial Gene Set Activity Analysis
 
 GESSO (Gene sEt activity Score analysis with Spatial lOcation) is a computational method for 
-quantifying the overall expression of gene sets/pathways.
+quantifying the expression of gene sets for spatial transcriptomics data.
 
 This repository is the official Python implementation of GESSO.
 
@@ -21,7 +21,7 @@ cd ..
 ```
 
 ### Quick start
-GESSO processes spatial transcriptomics data along with a user-defined gene set (aka pathway) and outputs a gene set activity score (GAS) for each spatial location.
+GESSO processes spatial transcriptomics data along with a user-defined gene set/pathway and outputs a gene set activity score (GAS) for each spatial location.
 
 Let's say your spatial transcriptomics dataset contains counts for $G$ genes across $N$ spots. You'll need to prepare an $N \times G$ expression `pd.DataFrame` as well as an $N \times 2$ locations `pd.DataFrame`. The indices of the two DataFrames must match. The locations DataFrame must contain two columns named `x` and `y`.
 
@@ -62,10 +62,3 @@ htest_report = model.htest_elevated_gas(
 htest_df = htest_report.htest_df()  # returns N by 4 df w/ columns 'x', 'y', 'p', 'gas'
 htest_df.to_csv("htest_output.csv")
 ```
-
-
-
-
-
-
-

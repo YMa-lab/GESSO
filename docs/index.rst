@@ -11,7 +11,3 @@ for spatially informed gene set expression analysis.
    gesso_demo.ipynb
    api_reference
 
-
-
-
-

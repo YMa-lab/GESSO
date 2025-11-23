@@ -9,7 +9,4 @@ A GESSO object is initialized with a spatial transcriptomics dataset and
 computes gene set activity scores (GASs) for user-defined gene sets or pathways.
 
 .. autoclass:: gesso.GESSO
-    :members:
-        __init__,
-        compute_gas,
-        htest_elevated_gas
+    :members: __init__, compute_gas, htest_elevated_gas

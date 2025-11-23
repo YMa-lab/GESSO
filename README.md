@@ -3,7 +3,7 @@
 GESSO (Gene sEt activity Score analysis with Spatial lOcation) is a computational method for 
 quantifying the expression of gene sets for spatial transcriptomics data.
 
-This repository is the official Python implementation of GESSO.
+This repository is the official Python implementation of GESSO. Please visit the [GESSO docs](https://gesso-malab.readthedocs.io/) for more information.
 
 ### Installation
 We recommend installing GESSO in a new Python environment. You can create a new Python environment through [conda](https://www.anaconda.com/docs/getting-started/miniconda/main):

@@ -63,4 +63,4 @@ htest_df = htest_report.htest_df()  # returns N by 4 df w/ columns 'x', 'y', 'p'
 htest_df.to_csv("htest_output.csv")
 ```
 ### Tutorial
-To run GESSO, please follow this [GESSO tutorial](https://gesso-malab.readthedocs.io/)
+For the step-by-step tutorial, please refer to: [GESSO tutorial](https://gesso-malab.readthedocs.io/)

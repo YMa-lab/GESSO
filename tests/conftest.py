@@ -7,9 +7,9 @@ import pytest
 
 matplotlib.use("Agg")
 
-from gesso._src.console import print_options
+from gesso import logging as glog
 
-print_options.mute()
+glog.disable()
 
 
 N_ROWS = 6

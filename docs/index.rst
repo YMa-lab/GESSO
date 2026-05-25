@@ -8,6 +8,6 @@ for spatially informed gene set expression analysis.
    :caption: Contents:
    
    intro
-   gesso_demo.ipynb
+   gesso_demo_10xvisium.ipynb
    api_reference
 

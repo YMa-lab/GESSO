@@ -1,4 +1,6 @@
+import logging
 import os
+import warnings
 import pandas as pd
 import scipy.spatial
 import scipy.sparse as sparse
@@ -6,7 +8,7 @@ import numpy as np
 from joblib import Parallel, delayed
 from typing import Literal
 import random
-from .console import print_wrapped
+from .console import COMPUTE_LOGGER, GENESET_LOGGER, INIT_LOGGER
 from .interactive import GeneSetActivityScoresReport, PermutationTestReport
 from .computation import (
     bulk_standard_scale,
@@ -15,6 +17,9 @@ from .computation import (
     partition_kmeans_stratified,
     partition_naive,
 )
+
+_init_logger = logging.getLogger(INIT_LOGGER)
+_compute_logger = logging.getLogger(COMPUTE_LOGGER)
 
 
 class GESSO:
@@ -74,7 +79,11 @@ class GESSO:
             log1p transformation.
 
         verbose : bool
-            Default: True. If True, prints progress messages during initialization.
+            Default: True. Per-instance override for emitting log messages from
+            this model. When True (default), messages flow through the standard
+            ``gesso.*`` loggers; configure output via ``gesso.logging``. When
+            False, all messages from this model are suppressed regardless of
+            logger configuration.
         """
         # preprocess input data
         self._expression_df = expression_df.T.copy()
@@ -85,6 +94,7 @@ class GESSO:
             self._genesets_df = None
 
         self._verbose = verbose
+        self._original_geneset_sizes: dict[str, int] = {}
 
         self._force_common_genes()
         self._force_common_cellid()
@@ -101,23 +111,28 @@ class GESSO:
                 index=self._expression_df.index,
                 columns=self._expression_df.columns,
             )
-            print_wrapped(
-                "Normalized expression data with strategy 'normalize'.", verbose=verbose
-            )
+            self._log_init("Normalized expression data with strategy 'normalize'.")
         elif normalize_counts_method == "normalize-log1p":
             self._expression_df = pd.DataFrame(
                 bulk_normalize(self._expression_df.to_numpy(), log1p=True),
                 index=self._expression_df.index,
                 columns=self._expression_df.columns,
             )
-            print_wrapped(
-                "Normalized expression data with strategy 'normalize-log1p'.",
-                verbose=verbose,
+            self._log_init(
+                "Normalized expression data with strategy 'normalize-log1p'."
             )
         elif normalize_counts_method != "none":
             raise ValueError("Invalid input for parameter 'normalize_counts'.")
         self._q_cache = None
-        print_wrapped("Model initialization complete.", verbose=verbose)
+        self._log_init("Model initialization complete.")
+
+    def _log_init(self, msg: str, level: int = logging.INFO) -> None:
+        if self._verbose:
+            _init_logger.log(level, msg)
+
+    def _log_compute(self, msg: str, level: int = logging.INFO) -> None:
+        if self._verbose:
+            _compute_logger.log(level, msg)
 
     def compute_gas(
         self,
@@ -130,6 +145,7 @@ class GESSO:
         partition_method: Literal["random", "stratified_kmeans"] = "stratified_kmeans",
         partition_seed: int = 42,
         store_gene_contributions: bool = True,
+        verbose: bool | None = None,
     ) -> GeneSetActivityScoresReport:
         """
         Parameters
@@ -175,6 +191,13 @@ class GESSO:
             Default: True. If True, stores gene contribution values.
             Set to False for memory-intensive tasks that do not require gene contribution values.
 
+        verbose : bool | None
+            Default: None. Per-call override. If None, inherits from the model's
+            ``verbose`` setting. If False, suppresses all messages (including
+            per-geneset worker output) for this call regardless of logger
+            configuration. If True, emits messages subject to the configuration
+            in ``gesso.logging``.
+
         Returns
         -------
         GeneSetActivityScoresReport
@@ -209,15 +232,40 @@ class GESSO:
             n_jobs = 1
         n_jobs = min(len(genesets), n_jobs)
 
+        # warn if any geneset has < 5% coverage after filtering to dataset genes
+        expression_gene_set = set(self._expression_df.index)
+        for geneset_name in genesets:
+            if genesets_dict is None:
+                n_filtered = int((self._genesets_df[geneset_name] == 1).sum())
+                n_original = self._original_geneset_sizes.get(
+                    geneset_name, n_filtered
+                )
+            else:
+                genes = genesets_dict[geneset_name]
+                n_original = len(genes)
+                n_filtered = sum(1 for g in genes if g in expression_gene_set)
+            if n_original > 0 and n_filtered / n_original < 0.05:
+                warnings.warn(
+                    f"Gene set '{geneset_name}': only {n_filtered}/{n_original} "
+                    f"({100 * n_filtered / n_original:.2f}%) genes remain after "
+                    f"filtering to genes in the dataset (< 5%). Activity scores "
+                    f"for this gene set may be unreliable.",
+                    stacklevel=2,
+                )
+
+        # resolve effective verbose for this call
+        call_verbose = self._verbose if verbose is None else verbose
+        # snapshot the per-geneset logger level so workers can replicate it
+        # (workers spawn fresh and don't inherit the main process's logger config)
+        worker_log_level = logging.getLogger(GENESET_LOGGER).getEffectiveLevel()
+
         # begin computation
         if compute_method == "cpu":
-            print_wrapped(
-                "Beginning activity score computation "
-                f"for {len(genesets)} gene sets "
-                f"with {n_jobs} jobs. "
-                f"Method used: {compute_method}.",
-                verbose=self._verbose,
-            )
+            if call_verbose:
+                _compute_logger.info(
+                    f"Beginning activity score computation for {len(genesets)} "
+                    f"gene sets with {n_jobs} jobs. Method used: {compute_method}."
+                )
             gas_df = pd.DataFrame(columns=self._expression_df.columns)
             geneset_to_gene_contributions_df_dict = dict()
 
@@ -237,7 +285,8 @@ class GESSO:
                     genes_in_geneset=genes_in_geneset,
                     job_num=job_num,
                     gene_contribution_sign_assignment_method="sign_overall_expression_proxy",
-                    verbose=self._verbose,
+                    verbose=call_verbose,
+                    worker_log_level=worker_log_level,
                 )
                 return geneset, v, u, genes_in_geneset
 
@@ -272,12 +321,12 @@ class GESSO:
             )
 
         elif compute_method == "lowres":
-            print(
-                "Beginning low resolution activity scores computation "
-                f"for {len(genesets)} gene sets "
-                f"with {n_jobs} jobs. "
-                f"Method used: {compute_method}."
-            )
+            if call_verbose:
+                _compute_logger.info(
+                    f"Beginning low resolution activity score computation for "
+                    f"{len(genesets)} gene sets with {n_jobs} jobs. Method used: "
+                    f"{compute_method}."
+                )
 
             if n_partitions is None:
                 n_partitions = max(int(len(self._locations_df) / 5000), 2)
@@ -321,7 +370,8 @@ class GESSO:
                     genes_in_geneset=genes_in_geneset,
                     job_num=job_num,
                     gene_contribution_sign_assignment_method="sign_overall_expression_proxy",
-                    verbose=self._verbose,
+                    verbose=call_verbose,
+                    worker_log_level=worker_log_level,
                 )
                 return (
                     geneset,
@@ -332,13 +382,6 @@ class GESSO:
                     geneset_num,
                     subset_num,
                 )
-
-            print_wrapped(
-                "Beginning low resolution activity score computation "
-                f"for {len(genesets)} gene sets "
-                f"with {n_jobs} jobs.",
-                verbose=self._verbose,
-            )
 
             parallel_input_list = []
             job_num = 1
@@ -586,11 +629,9 @@ class GESSO:
         degrees = adjacency_matrix.sum(axis=1).A1
         laplacian = sparse.diags(degrees) - adjacency_matrix
 
-        print_wrapped(
-            "Constructed Laplacian matrix from location data "
-            f"with {k} nearest neighbors.",
-            level="DEBUG",
-            verbose=self._verbose,
+        self._log_init(
+            f"Constructed Laplacian matrix from location data with {k} nearest neighbors.",
+            level=logging.DEBUG,
         )
 
         return laplacian
@@ -739,6 +780,11 @@ class GESSO:
         self._expression_df = process_dataframe(self._expression_df)
         self._genesets_df = process_dataframe(self._genesets_df)
 
+        # record original geneset sizes prior to common-gene filtering
+        self._original_geneset_sizes = (
+            (self._genesets_df == 1).sum(axis=0).astype(int).to_dict()
+        )
+
         genes_geneset_set = set(self._genesets_df.index)
         genes_expression_set = set(self._expression_df.index)
 
@@ -746,21 +792,20 @@ class GESSO:
         n_genes_removed_geneset = len(genes_geneset_set - common_genes_set)
         n_genes_removed_expression = len(genes_expression_set - common_genes_set)
 
-        def print_removal_info(n_removed: int, data_type: str):
-            if n_removed > 0:
-                print_wrapped(
-                    f"Removed {n_removed} genes not found in {data_type} data. "
-                    f"{len(common_genes_set)} genes remain.",
-                    verbose=self._verbose,
-                )
+        if n_genes_removed_geneset > 0:
+            self._log_init(
+                f"Removed {n_genes_removed_geneset} genes not found in geneset data. "
+                f"{len(common_genes_set)} genes remain."
+            )
+        if n_genes_removed_expression > 0:
+            self._log_init(
+                f"Removed {n_genes_removed_expression} genes not found in expression "
+                f"data. {len(common_genes_set)} genes remain."
+            )
 
-        print_removal_info(n_genes_removed_geneset, "geneset")
-        print_removal_info(n_genes_removed_expression, "expression")
-
-        print_wrapped(
+        self._log_init(
             f"Identified {len(common_genes_set)} common genes in the gene set "
-            "and expression data.",
-            verbose=self._verbose,
+            "and expression data."
         )
         original_expression_order = self._expression_df.index
         common_genes_list = [
@@ -784,21 +829,20 @@ class GESSO:
         n_spots_removed_location = len(obs_locations_set - common_spots_set)
         n_spots_removed_expression = len(obs_expression_set - common_spots_set)
 
-        def print_removal_info(n_removed: int, data_type: str):
-            if n_removed > 0:
-                print_wrapped(
-                    f"Removed {n_removed} spots not found in {data_type} data. "
-                    f"{len(common_spots_set)} spots remain.",
-                    verbose=self._verbose,
-                )
+        if n_spots_removed_location > 0:
+            self._log_init(
+                f"Removed {n_spots_removed_location} spots not found in expression "
+                f"data. {len(common_spots_set)} spots remain."
+            )
+        if n_spots_removed_expression > 0:
+            self._log_init(
+                f"Removed {n_spots_removed_expression} spots not found in location "
+                f"data. {len(common_spots_set)} spots remain."
+            )
 
-        print_removal_info(n_spots_removed_location, "expression")
-        print_removal_info(n_spots_removed_expression, "location")
-
-        print_wrapped(
+        self._log_init(
             f"Identified {len(common_spots_set)} common spots in the location "
-            "and expression data.",
-            verbose=self._verbose,
+            "and expression data."
         )
         original_loc_order = self._locations_df.index
         common_spots_list = [

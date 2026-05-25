@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 import scipy.sparse as sparse
 import scipy.sparse.linalg as splinalg
@@ -5,7 +6,9 @@ from typing import Literal
 import time
 import pandas as pd
 from sklearn.cluster import KMeans
-from .console import print_wrapped
+from .console import GENESET_LOGGER, ensure_worker_handler
+
+_geneset_logger = logging.getLogger(GENESET_LOGGER)
 
 
 def maybe_flip(u: np.ndarray, v: np.ndarray, flip: bool):
@@ -232,6 +235,7 @@ def gLPCA_sparse(
         "sign_overall_expression_proxy",
     ] = "sign_overall_expression_proxy",
     verbose: bool = True,
+    worker_log_level: int = logging.INFO,
 ) -> tuple[np.ndarray, np.ndarray, str, list[str]]:
     """This method implements Theorem 3.1 of the paper Graph-Laplacian PCA:
     Closed-form Solution and Robustness by Bo Jiang, Chris Ding, Bin Luo, and Jin Tang.
@@ -280,7 +284,15 @@ def gLPCA_sparse(
             sign of the resulting Pearson correlation coefficients.
 
     verbose : bool
-        Default: True. If False, does not print the message.
+        Default: True. If False, suppresses all log messages from this call
+        regardless of logger configuration. If True, messages flow through the
+        ``gesso.compute.geneset`` logger (configure via ``gesso.logging``).
+
+    worker_log_level : int
+        Default: ``logging.INFO``. Effective log level inherited from the
+        calling process. Workers spawn fresh and don't inherit the parent's
+        logger config, so this is replicated here to honor levels set via
+        ``gesso.logging.set_level`` / ``silence_per_geneset`` in the parent.
 
     Returns
     -------
@@ -296,6 +308,14 @@ def gLPCA_sparse(
     list[str]
         List of genes in the geneset.
     """
+    if verbose:
+        ensure_worker_handler(level=worker_log_level)
+        _geneset_logger.setLevel(worker_log_level)
+
+    def _log(msg: str, level: int = logging.INFO) -> None:
+        if verbose:
+            _geneset_logger.log(level, msg)
+
     if isinstance(X, np.ndarray):
         X = sparse.csr_matrix(X)
     elif not isinstance(X, sparse.csr_matrix):
@@ -309,11 +329,7 @@ def gLPCA_sparse(
     start = time.time()
     n = X.shape[1]
     G = X.T @ X
-    print_wrapped(
-        f"(Job {job_num}: {geneset_name}) " "Computed gram matrix",
-        "DEBUG",
-        verbose=verbose,
-    )
+    _log(f"(Job {job_num}: {geneset_name}) Computed gram matrix", logging.DEBUG)
 
     # initialize an rng
     rng = np.random.default_rng(42)
@@ -321,9 +337,7 @@ def gLPCA_sparse(
     lmbda = _eigsh_largest_robust(
         G, k=1, return_eigenvectors=False, v0=rng.standard_normal(n)
     )[0]
-    print_wrapped(
-        f"(Job {job_num}: {geneset_name}) " "Computed lmbda", "DEBUG", verbose=verbose
-    )
+    _log(f"(Job {job_num}: {geneset_name}) Computed lmbda", logging.DEBUG)
 
     ident = sparse.eye(n)
     psd_temp = ident - G / lmbda
@@ -331,20 +345,14 @@ def gLPCA_sparse(
     xi = _eigsh_largest_robust(
         L, k=1, return_eigenvectors=False, v0=rng.standard_normal(n)
     )[0]
-    print_wrapped(
-        f"(Job {job_num}: {geneset_name}) " "Computed xi", "DEBUG", verbose=verbose
-    )
+    _log(f"(Job {job_num}: {geneset_name}) Computed xi", logging.DEBUG)
 
     G_beta = (1 - beta) * psd_temp + beta * (L / xi + ident / n)
 
     eigenvalue, eigenvector = _eigsh_smallest_robust(
         G_beta, k=1, v0=rng.standard_normal(n)
     )
-    print_wrapped(
-        f"(Job {job_num}: {geneset_name}) " "Computed eigenpair",
-        "DEBUG",
-        verbose=verbose,
-    )
+    _log(f"(Job {job_num}: {geneset_name}) Computed eigenpair", logging.DEBUG)
 
     eigenvalue = eigenvalue[0]
     v_optimal = eigenvector.flatten()
@@ -367,17 +375,14 @@ def gLPCA_sparse(
     seconds = np.round(end - start, 2)
 
     if job_num is not None:
-        print_wrapped(
-            f"(Job {job_num}: {geneset_name}) "
-            f"Activity score computation for {geneset_name} completed "
-            f"in {seconds} seconds.",
-            verbose=verbose,
+        _log(
+            f"(Job {job_num}: {geneset_name}) Activity score computation for "
+            f"{geneset_name} completed in {seconds} seconds."
         )
     else:
-        print_wrapped(
-            f"Activity score computation for geneset {geneset_name} "
-            f"completed in {seconds} seconds.",
-            verbose=verbose,
+        _log(
+            f"Activity score computation for geneset {geneset_name} completed "
+            f"in {seconds} seconds."
         )
 
     return u_optimal, v_optimal, geneset_name, genes_in_geneset

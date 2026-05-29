@@ -15,7 +15,7 @@ conda activate gesso
 GESSO requires Python version 3.12. The following script installs GESSO into your Python environment:
 ```bash
 git clone https://github.com/YMa-Lab/GESSO.git
-cd gesso
+cd GESSO
 pip install .
 cd ..
 ```
@@ -37,7 +37,7 @@ locations_df: pd.DataFrame = ...
 model = GESSO(
     expression_df=expression_df,
     locations_df=locations_df,
-    k=20,   # increase k to increase spatial smoothing effect
+    k=20,
     normalize_counts_method="normalize-log1p"   # optional, use for raw data
 )
 
@@ -56,11 +56,12 @@ gas_df.to_csv("gas_output.csv")
 htest_report = model.htest_elevated_gas(
     geneset="example_geneset_1",
     genes_in_geneset=["gene1", "gene2", "gene3"],
-    control_size=200,
+    n_permutations=500,     # number of random gene sets to sample
     n_jobs=8
 )
-htest_df = htest_report.htest_df()  # returns N by 4 df w/ columns 'x', 'y', 'p', 'gas'
+htest_df = htest_report.htest_df()  # returns N by 4 df w/ columns 'x', 'y', 'gas', 'p'
 htest_df.to_csv("htest_output.csv")
 ```
+
 ### Tutorial
 For the step-by-step tutorial, please refer to: [GESSO tutorial](https://gesso-malab.readthedocs.io/)

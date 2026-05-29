@@ -13,7 +13,7 @@ class GeneSetActivityScoresReport:
         self,
         gas_df: pd.DataFrame,
         locations_df: pd.DataFrame,
-        geneset_to_metagene_df_dict: dict,
+        geneset_to_gene_contributions_df_dict: dict,
     ) -> None:
         """Initializes the GeneSetActivityScoresReport object.
 
@@ -25,23 +25,23 @@ class GeneSetActivityScoresReport:
         location_df : pd.DataFrame
             Locations DataFrame. Should be of size (n_obs, 2).
 
-        geneset_to_metagene_df_dict: dict
-            Dictionary of geneset to metagene DataFrames.
+        geneset_to_gene_contributions_df_dict: dict
+            Dictionary of geneset to gene contribution DataFrames.
         """
         self._gas_df = gas_df
         self._location_df = locations_df
         self._orig_spot_order = locations_df.index
-        self._geneset_to_metagene_df_dict: dict[str, pd.DataFrame] = (
-            geneset_to_metagene_df_dict
+        self._geneset_to_gene_contributions_df_dict: dict[str, pd.DataFrame] = (
+            geneset_to_gene_contributions_df_dict
         )
         self._n_examples, self._n_genesets = gas_df.shape
 
-    def metagene_df(
+    def gene_contributions_df(
         self,
         geneset: str,
-        sort_by: Literal["metagene_weight", "gene_name"] = "metagene_weight",
+        sort_by: Literal["gene_contribution", "gene_name"] = "gene_contribution",
     ) -> pd.DataFrame:
-        """Returns a metagene DataFrame with a single column (geneset name).
+        """Returns a gene contribution DataFrame with a single column (geneset name).
         The index is the gene name.
 
         Parameters
@@ -49,17 +49,17 @@ class GeneSetActivityScoresReport:
         geneset : str
             geneset name.
 
-        sort_by : Literal["metagene_weight", "gene_name"]
-            Default: "metagene_weight". How to sort the DataFrame.
-            If "metagene_weight", sorts by the metagene weight (descending).
+        sort_by : Literal["gene_contribution", "gene_name"]
+            Default: "gene_contribution". How to sort the DataFrame.
+            If "gene_contribution", sorts by the gene contribution weight (descending).
             If "gene_name", sorts by the gene name (ascending).
 
         Returns
         -------
         pd.DataFrame
         """
-        output = self._geneset_to_metagene_df_dict[geneset]
-        if sort_by == "metagene_weight":
+        output = self._geneset_to_gene_contributions_df_dict[geneset]
+        if sort_by == "gene_contribution":
             output = output.sort_values(by=geneset, ascending=False)
         elif sort_by == "gene_name":
             # the gene name is in the index
@@ -67,7 +67,7 @@ class GeneSetActivityScoresReport:
         else:
             raise ValueError(
                 f"Invalid sort_by value: {sort_by}. "
-                "Must be 'metagene_weight' or 'gene_name'."
+                "Must be 'gene_contribution' or 'gene_name'."
             )
         return output
 
@@ -212,7 +212,7 @@ class PermutationTestReport:
             fig = ax.get_figure()
         plotting_df = self._permutation_test_df
 
-        cdata = plotting_df[self._geneset].to_numpy()
+        cdata = plotting_df["gas"].to_numpy()
         scatter = ax.scatter(
             x=plotting_df["x"],
             y=plotting_df["y"],

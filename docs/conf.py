@@ -42,6 +42,10 @@ extensions = [
     "nbsphinx",
 ]
 
+# never re-execute demo notebooks at build time; they rely on large datasets
+# not available on the build server, so we render their stored outputs as-is.
+nbsphinx_execute = "never"
+
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
 

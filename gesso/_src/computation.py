@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 import scipy.sparse as sparse
 import scipy.sparse.linalg as splinalg
@@ -5,7 +6,9 @@ from typing import Literal
 import time
 import pandas as pd
 from sklearn.cluster import KMeans
-from .console import print_wrapped
+from .console import GENESET_LOGGER, ensure_worker_handler
+
+_geneset_logger = logging.getLogger(GENESET_LOGGER)
 
 
 def maybe_flip(u: np.ndarray, v: np.ndarray, flip: bool):
@@ -14,7 +17,73 @@ def maybe_flip(u: np.ndarray, v: np.ndarray, flip: bool):
     return u, v
 
 
-def align_metagene_sign(
+def _eigsh_smallest_robust(A, k=1, v0=None):
+    """robust smallest-algebraic eigenpair via cascading fallbacks.
+
+    arpack 'SA' mode is often slow or non-convergent on laplacian-derived
+    matrices (eigenvalues clustered near 0). when it fails it raises an
+    arpack error that scipy's own formatter crashes on (TypeError: %d format),
+    which kills joblib's worker pool entirely. cascade through: SA -> SA with
+    larger ncv -> shift-invert near 0 -> dense eigh. always returns k smallest
+    eigenpairs; never raises.
+    """
+    # default SA
+    try:
+        return splinalg.eigsh(A, k=k, which="SA", v0=v0)
+    except Exception:
+        pass
+    # SA with bigger lanczos basis
+    try:
+        return splinalg.eigsh(A, k=k, which="SA", v0=v0, ncv=max(2 * k + 1, 50))
+    except Exception:
+        pass
+    # shift-invert at small non-zero sigma (avoid 0 if matrix is singular)
+    try:
+        return splinalg.eigsh(A, k=k, sigma=1e-8, which="LM")
+    except Exception:
+        pass
+    # dense fallback
+    A_dense = A.toarray() if hasattr(A, "toarray") else np.asarray(A)
+    eigvals, eigvecs = np.linalg.eigh(A_dense)
+    return eigvals[:k], eigvecs[:, :k]
+
+
+def _eigsh_largest_robust(A, k=1, return_eigenvectors=True, v0=None):
+    """robust largest-algebraic eigenpair via cascading fallbacks.
+
+    arpack 'LA' mode is normally well-behaved but can also fail when the
+    input matrix is rank-deficient in a sparse partition (e.g. very few
+    genes in a small geneset and/or a small spot subset). same crash mode
+    in scipy's error formatter; same cascade structure as the smallest helper.
+    """
+    # default LA
+    try:
+        return splinalg.eigsh(
+            A, k=k, which="LA", v0=v0, return_eigenvectors=return_eigenvectors
+        )
+    except Exception:
+        pass
+    # LA with bigger lanczos basis
+    try:
+        return splinalg.eigsh(
+            A,
+            k=k,
+            which="LA",
+            v0=v0,
+            return_eigenvectors=return_eigenvectors,
+            ncv=max(2 * k + 1, 50),
+        )
+    except Exception:
+        pass
+    # dense fallback
+    A_dense = A.toarray() if hasattr(A, "toarray") else np.asarray(A)
+    eigvals, eigvecs = np.linalg.eigh(A_dense)
+    if return_eigenvectors:
+        return eigvals[-k:], eigvecs[:, -k:]
+    return eigvals[-k:]
+
+
+def align_gene_contribution_sign(
     u_optimal: np.ndarray,
     v_optimal: np.ndarray,
     X: np.ndarray,
@@ -43,10 +112,10 @@ def align_metagene_sign(
         proxy = X.mean(axis=0)
         corr = np.corrcoef(v_optimal, proxy)[0, 1]
         return flip_if((corr < 0) or np.isnan(corr))
-    raise ValueError(f"Unknown metagene_sign_assignment_method: {method!r}")
+    raise ValueError(f"Unknown gene_contribution_sign_assignment_method: {method!r}")
 
 
-def align_metagene_sign_sparse(
+def align_gene_contribution_sign_sparse(
     u_optimal: np.ndarray,
     v_optimal: np.ndarray,
     X: sparse.csr_matrix,
@@ -77,7 +146,7 @@ def align_metagene_sign_sparse(
         proxy = np.asarray(proxy).ravel()
         corr = np.corrcoef(v_optimal, proxy)[0, 1]
         return flip_if(np.sign(corr) < 0 or np.isnan(corr))
-    raise ValueError(f"Unknown metagene_sign_assignment_method: {method!r}")
+    raise ValueError(f"Unknown gene_contribution_sign_assignment_method: {method!r}")
 
 
 def bulk_standard_scale(
@@ -158,7 +227,7 @@ def gLPCA_sparse(
     genes_in_geneset: list,
     beta: float = 0,
     job_num: int | None = None,
-    metagene_sign_assignment_method: Literal[
+    gene_contribution_sign_assignment_method: Literal[
         "none",
         "sign_max_abs",
         "most_frequent_sign_weights",
@@ -166,6 +235,7 @@ def gLPCA_sparse(
         "sign_overall_expression_proxy",
     ] = "sign_overall_expression_proxy",
     verbose: bool = True,
+    worker_log_level: int = logging.INFO,
 ) -> tuple[np.ndarray, np.ndarray, str, list[str]]:
     """This method implements Theorem 3.1 of the paper Graph-Laplacian PCA:
     Closed-form Solution and Robustness by Bo Jiang, Chris Ding, Bin Luo, and Jin Tang.
@@ -193,33 +263,41 @@ def gLPCA_sparse(
     job_num : int
         Job number for logging updates.
 
-    metagene_sign_assignment_method : Literal["none", "sign_max_abs", \
+    gene_contribution_sign_assignment_method : Literal["none", "sign_max_abs", \
         "most_frequent_sign_weights", "most_frequent_sign_corrs"]
         Default: "sign_overall_expression_proxy". As with all PCA/SVD-based methods, GESSO suffers 
         from a sign ambiguity problem. This parameter sets the heuristics-based 
-        method to determine the sign of the metagene weights. The geneset 
+        method to determine the sign of the gene contribution weights. The geneset 
         activity scores are modified accordingly.
         Options:
         - "none": None.
-        - "sign_max_abs": Multiplies the metagene by `sign(max(abs(metagene)))`.
-        - "most_frequent_sign_weights": Multiplies the metagene by the most frequent
-            sign of all metagene weights.
+        - "sign_max_abs": Multiplies the gene contribution vector u by `sign(max(abs(u)))`.
+        - "most_frequent_sign_weights": Multiplies the gene contribution by the most frequent
+            sign of all gene contribution weights.
         - "most_frequent_sign_corrs": Computes the Pearson correlation between 
             the geneset activity scores and the gene expression for all genes 
-            in the geneset. Multiplies the metagene by the most frequent sign of 
+            in the geneset. Multiplies the gene contribution by the most frequent sign of 
             all resulting Pearson correlation coefficients.
         - "sign_overall_expression_proxy": Computes the Pearson correlation
             between the geneset activity scores and the overall expression of
-            all genes in the geneset. Multiplies the metagene by the most frequent
+            all genes in the geneset. Multiplies the gene contribution by the most frequent
             sign of the resulting Pearson correlation coefficients.
 
     verbose : bool
-        Default: True. If False, does not print the message.
+        Default: True. If False, suppresses all log messages from this call
+        regardless of logger configuration. If True, messages flow through the
+        ``gesso.compute.geneset`` logger (configure via ``gesso.logging``).
+
+    worker_log_level : int
+        Default: ``logging.INFO``. Effective log level inherited from the
+        calling process. Workers spawn fresh and don't inherit the parent's
+        logger config, so this is replicated here to honor levels set via
+        ``gesso.logging.set_level`` / ``silence_per_geneset`` in the parent.
 
     Returns
     -------
     np.ndarray ~ (n_genes)
-        1D metagene vector (optimal U vector).
+        1D gene contribution vector (optimal U vector).
 
     np.ndarray ~ (n_obs)
         1D geneset activity score vector (optimal V vector).
@@ -230,6 +308,14 @@ def gLPCA_sparse(
     list[str]
         List of genes in the geneset.
     """
+    if verbose:
+        ensure_worker_handler(level=worker_log_level)
+        _geneset_logger.setLevel(worker_log_level)
+
+    def _log(msg: str, level: int = logging.INFO) -> None:
+        if verbose:
+            _geneset_logger.log(level, msg)
+
     if isinstance(X, np.ndarray):
         X = sparse.csr_matrix(X)
     elif not isinstance(X, sparse.csr_matrix):
@@ -243,75 +329,60 @@ def gLPCA_sparse(
     start = time.time()
     n = X.shape[1]
     G = X.T @ X
-    print_wrapped(
-        f"(Job {job_num}: {geneset_name}) " "Computed gram matrix",
-        "DEBUG",
-        verbose=verbose,
-    )
+    _log(f"(Job {job_num}: {geneset_name}) Computed gram matrix", logging.DEBUG)
 
     # initialize an rng
     rng = np.random.default_rng(42)
 
-    lmbda = splinalg.eigsh(
-        G, k=1, return_eigenvectors=False, which="LA", v0=rng.standard_normal(n)
+    lmbda = _eigsh_largest_robust(
+        G, k=1, return_eigenvectors=False, v0=rng.standard_normal(n)
     )[0]
-    print_wrapped(
-        f"(Job {job_num}: {geneset_name}) " "Computed lmbda", "DEBUG", verbose=verbose
-    )
+    _log(f"(Job {job_num}: {geneset_name}) Computed lmbda", logging.DEBUG)
 
     ident = sparse.eye(n)
     psd_temp = ident - G / lmbda
 
-    xi = splinalg.eigsh(
-        L, k=1, return_eigenvectors=False, which="LA", v0=rng.standard_normal(n)
+    xi = _eigsh_largest_robust(
+        L, k=1, return_eigenvectors=False, v0=rng.standard_normal(n)
     )[0]
-    print_wrapped(
-        f"(Job {job_num}: {geneset_name}) " "Computed xi", "DEBUG", verbose=verbose
-    )
+    _log(f"(Job {job_num}: {geneset_name}) Computed xi", logging.DEBUG)
 
     G_beta = (1 - beta) * psd_temp + beta * (L / xi + ident / n)
 
-    eigenvalue, eigenvector = splinalg.eigsh(
-        G_beta, k=1, which="SA", v0=rng.standard_normal(n)
+    eigenvalue, eigenvector = _eigsh_smallest_robust(
+        G_beta, k=1, v0=rng.standard_normal(n)
     )
-    print_wrapped(
-        f"(Job {job_num}: {geneset_name}) " "Computed eigenpair",
-        "DEBUG",
-        verbose=verbose,
-    )
+    _log(f"(Job {job_num}: {geneset_name}) Computed eigenpair", logging.DEBUG)
 
     eigenvalue = eigenvalue[0]
     v_optimal = eigenvector.flatten()
 
     u_optimal = X @ v_optimal
 
-    # scale the metagene vector to have unit norm
+    # scale the gene contribution vector to have unit norm
     scaling_factor = np.linalg.norm(u_optimal)
     u_optimal = u_optimal / scaling_factor
     v_optimal = v_optimal * scaling_factor
 
-    u_optimal, v_optimal = align_metagene_sign_sparse(
+    u_optimal, v_optimal = align_gene_contribution_sign_sparse(
         u_optimal=u_optimal,
         v_optimal=v_optimal,
         X=X,
-        method=metagene_sign_assignment_method,
+        method=gene_contribution_sign_assignment_method,
     )
 
     end = time.time()
     seconds = np.round(end - start, 2)
 
     if job_num is not None:
-        print_wrapped(
-            f"(Job {job_num}: {geneset_name}) "
-            f"Activity score computation for {geneset_name} completed "
-            f"in {seconds} seconds.",
-            verbose=verbose,
+        _log(
+            f"(Job {job_num}: {geneset_name}) Activity score computation for "
+            f"{geneset_name} completed in {seconds} seconds."
         )
     else:
-        print_wrapped(
-            f"Activity score computation for geneset {geneset_name} "
-            f"completed in {seconds} seconds.",
-            verbose=verbose,
+        _log(
+            f"Activity score computation for geneset {geneset_name} completed "
+            f"in {seconds} seconds."
         )
 
     return u_optimal, v_optimal, geneset_name, genes_in_geneset

@@ -28,14 +28,22 @@ classifiers = [
     "Programming Language :: Python"
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0"
+]
 
 
 [project.urls]
-Homepage = ""
+Homepage = "https://github.com/YMa-Lab/GESSO"
+Documentation = "https://gesso-malab.readthedocs.io/"
 
 
 
-[tool.hatch.metadata]
-packages = [
-    {include = "splat"}
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
 ]

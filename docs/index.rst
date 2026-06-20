@@ -19,3 +19,4 @@ for spatially informed gene set expression analysis.
    gesso_demo_visiumhd.ipynb
    gesso_demo_xenium_prime.ipynb
    gesso_demo_cosmx.ipynb
+   gesso_demo_behavior_at_extremes.ipynb

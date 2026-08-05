@@ -80,7 +80,9 @@ class GessoFormatter(logging.Formatter):
             prefix = bold_text("GESSO (debug): ")
         else:
             prefix = bold_text("GESSO (info): ")
-        return fill_ignore_format(prefix + record.getMessage(), width=self._max_line_width)
+        return fill_ignore_format(
+            prefix + record.getMessage(), width=self._max_line_width
+        )
 
 
 def ensure_worker_handler(level: int = logging.INFO):

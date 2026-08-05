@@ -3,4 +3,4 @@ from . import logging
 
 __all__ = ["GESSO", "GeneSetActivityScoresReport", "PermutationTestReport", "logging"]
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0"

@@ -236,9 +236,7 @@ class GESSO:
         for geneset_name in genesets:
             if genesets_dict is None:
                 n_filtered = int((self._genesets_df[geneset_name] == 1).sum())
-                n_original = self._original_geneset_sizes.get(
-                    geneset_name, n_filtered
-                )
+                n_original = self._original_geneset_sizes.get(geneset_name, n_filtered)
             else:
                 genes = genesets_dict[geneset_name]
                 n_original = len(genes)

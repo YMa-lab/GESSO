@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 [project]
 name = "gesso"
 version = "0.1.0"
-description = "GESSO: Spatially Informed Gene Set Expression Analysis"
+description = "GESSO: spatially informed gene set activity analysis"
 authors = [
     {name = "Andrew Yang", email = "andrew_j_yang@brown.edu"},
     {name = "Chichun Tan", email = "chichun_tan@brown.edu"},

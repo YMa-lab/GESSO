@@ -24,7 +24,7 @@ _compute_logger = logging.getLogger(COMPUTE_LOGGER)
 
 class GESSO:
     """GESSO (Gene sEt activity Score analysis with Spatial lOcation)
-    is a model for spatially informed gene set expression analysis.
+    is a model for spatially informed gene set activity analysis.
     """
 
     def __init__(
@@ -39,7 +39,7 @@ class GESSO:
         verbose: bool = True,
     ):
         """Constructs a GESSO (Gene sEt activity Score analysis with Spatial lOcation)
-        model for spatially informed gene set expression analysis. Given spatial
+        model for spatially informed gene set activity analysis. Given spatial
         transcriptomics data and a gene set or pathway, GESSO will return
         a gene set activity score (GAS) for each spatial location (spot).
 
@@ -165,24 +165,24 @@ class GESSO:
         beta : float
             Default: 0.33. Must be in the interval [0, 1]. Suggested beta < 0.5.
 
-        compute_method : Literal["cpu-sparse", "cpu", "lowres-sparse", "lowres"]
+        compute_method : Literal["cpu", "lowres"]
             The method to use for computation.
 
         n_jobs : int
-            Default: 1. Number of parallel jobs to run. If -1, uses half of
-            all available CPUs.
+            Default: -1. Number of parallel jobs to run. If -1, uses all
+            available CPUs.
 
         n_partitions : int | None
             Default: None. Number of low resolution subsets to use for the lowres
-            method. Must be an integer if compute_method is "lowres-sparse" or
-            "lowres". Ignored if compute_method is "cpu-sparse" or "cpu".
+            method. Must be an integer if compute_method is "lowres".
+            Ignored if compute_method is "cpu".
             If not specified, uses `n_partitions = int(n_spots / 5000)`.
             If `n_partitions < 2`, uses `n_partitions = 2`.
 
         partition_method : Literal["random", "stratified_kmeans"]
             Default: "stratified_kmeans". Method to use for partitioning the
             spots into subsets for the low resolution method. Ignored if
-            compute_method is "cpu-sparse" or "cpu".
+            compute_method is "cpu".
 
         partition_seed : int
             Default: 42. Random seed for reproducibility.

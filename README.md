@@ -1,11 +1,11 @@
 # GESSO: Spatial Gene Set Activity Analysis
 
-GESSO (Gene sEt activity Score analysis with Spatial lOcation) is a computational method for 
-quantifying the expression of gene sets for spatial transcriptomics data.
+GESSO (Gene sEt activity Score analysis with Spatial lOcation) is a computational method for
+estimating spatially coherent gene set activity from spatial transcriptomics data.
 
-This repository is the official Python implementation of GESSO. Please visit the [GESSO tutorial](https://gesso-malab.readthedocs.io/) for more information.
+This repository is the official Python implementation of GESSO. Please visit the [GESSO documentation](https://gesso-malab.readthedocs.io/) for tutorials and API details. Code used for the accompanying analyses is available in the [GESSO-Analysis repository](https://github.com/YMa-Lab/GESSO-Analysis).
 
-### Installation
+## Installation
 We recommend installing GESSO in a new Python environment. You can create a new Python environment through [conda](https://www.anaconda.com/docs/getting-started/miniconda/main):
 ```bash
 conda create -n gesso python=3.12 -y
@@ -20,7 +20,7 @@ pip install .
 cd ..
 ```
 
-### Quick start
+## Quick start
 GESSO processes spatial transcriptomics data along with a user-defined gene set/pathway and outputs a gene set activity score (GAS) for each spatial location.
 
 Let's say your spatial transcriptomics dataset contains counts for $G$ genes across $N$ spots. You'll need to prepare an $N \times G$ expression `pd.DataFrame` as well as an $N \times 2$ locations `pd.DataFrame`. The indices of the two DataFrames must match. The locations DataFrame must contain two columns named `x` and `y`.
@@ -63,5 +63,14 @@ htest_df = htest_report.htest_df()  # returns N by 4 df w/ columns 'x', 'y', 'ga
 htest_df.to_csv("htest_output.csv")
 ```
 
-### Tutorial
-For the step-by-step tutorial, please refer to: [GESSO tutorial](https://gesso-malab.readthedocs.io/)
+## Tutorials
+
+The [documentation](https://gesso-malab.readthedocs.io/) includes a runnable tutorial using the small dataset bundled in `demo_data`, as well as demonstrations for several spatial transcriptomics platforms. The platform-scale demonstrations require the corresponding public datasets described in each notebook.
+
+## Citation
+
+Citation metadata are provided in [`CITATION.cff`](CITATION.cff) and will be updated with the article DOI after publication. Please cite the article and the specific GESSO software release used in your analysis.
+
+## License
+
+GESSO is released under the [MIT License](LICENSE).

@@ -12,7 +12,7 @@ for each spatial spot in the dataset.
 Installation
 ------------
 Install GESSO into a new Python environment.
-Your environment should have Python 3.10 or later, as well as pip and git installed.
+Your environment should have Python 3.12, as well as pip and git installed.
 
 .. code-block:: bash
 
@@ -60,10 +60,9 @@ Suppose your spatial transcriptomics dataset contains counts for :math:`G` genes
     htest_report = model.htest_elevated_gas(
         geneset="example_geneset_1",
         genes_in_geneset=["gene1", "gene2", "gene3"],
-        control_size=200,
+        n_permutations=200,
         n_jobs=8
     )
     htest_df = htest_report.htest_df()  # returns N by 4 df w/ columns 'x', 'y', 'p', 'gas'
     htest_df.to_csv("htest_output.csv")
-
 

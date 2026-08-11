@@ -19,8 +19,8 @@ sys.path.insert(0, os.path.abspath(".."))
 # -- Project information -----------------------------------------------------
 
 project = "GESSO"
-copyright = "2025, Andrew Yang"
-author = "Andrew Yang"
+copyright = "2026, Andrew Yang, Chichun Tan, Ying Ma"
+author = "Andrew Yang, Chichun Tan, Ying Ma"
 
 # The full version, including alpha/beta/rc tags
 release = "0.1.0"

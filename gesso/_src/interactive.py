@@ -169,7 +169,7 @@ class PermutationTestReport:
         geneset : str
             The name of the geneset for which the permutation test was performed.
 
-        permuation_test_df : pd.DataFrame
+        permutation_test_df : pd.DataFrame
             DataFrame containing the results of the permutation test.
             Should have columns: 'x', 'y', 'gas', 'p'
         """

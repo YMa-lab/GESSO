@@ -7,3 +7,4 @@ scipy==1.15.2
 scikit-learn==1.5.2
 matplotlib==3.10.1
 joblib==1.5.1
+ipython-pygments-lexers==1.1.1

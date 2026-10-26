@@ -13,3 +13,19 @@ version: 0.1.0
 repository-code: "https://github.com/YMa-Lab/GESSO"
 url: "https://gesso-malab.readthedocs.io/"
 license: MIT
+preferred-citation:
+  type: article
+  authors:
+    - family-names: Yang
+      given-names: Andrew J.
+    - family-names: Tan
+      given-names: Chichun
+    - family-names: Ma
+      given-names: Ying
+  title: "Interpretable and scalable spatial gene set activity analysis with GESSO uncovers functional tissue architecture"
+  journal: "Nature Communications"
+  year: 2026
+  month: 10
+  date-published: "2026-10-14"
+  doi: "10.1038/s41467-026-78316-z"
+  url: "https://www.nature.com/articles/s41467-026-78316-z"

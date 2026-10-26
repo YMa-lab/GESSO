@@ -3,7 +3,11 @@
 GESSO (Gene sEt activity Score analysis with Spatial lOcation) is a computational method for
 estimating spatially coherent gene set activity from spatial transcriptomics data.
 
-This repository is the official Python implementation of GESSO. Please visit the [GESSO documentation](https://gesso-malab.readthedocs.io/) for tutorials and API details. Code used for the accompanying analyses is available in the [GESSO-Analysis repository](https://github.com/YMa-Lab/GESSO-Analysis).
+This repository is the official Python implementation of GESSO. Please visit the [GESSO documentation](https://gesso-malab.readthedocs.io/) for tutorials and API details.
+
+![GESSO workflow showing spatial gene set activity estimation, local activity enrichment testing, and downstream biological analyses.](docs/_static/fig1_ncomm.png)
+
+*Figure 1. Overview of the GESSO workflow and applications. From the [GESSO paper in Nature Communications](https://doi.org/10.1038/s41467-026-78316-z).*
 
 ## Installation
 We recommend installing GESSO in a new Python environment. You can create a new Python environment through [conda](https://www.anaconda.com/docs/getting-started/miniconda/main):
@@ -12,7 +16,9 @@ conda create -n gesso python=3.12 -y
 conda activate gesso
 ```
 
-GESSO requires Python version 3.12. The following script installs GESSO into your Python environment:
+GESSO supports Python 3.12, 3.13, and 3.14. The example above uses 3.12; you can
+substitute either of the other supported versions. The following script installs
+GESSO into your Python environment:
 ```bash
 git clone https://github.com/YMa-Lab/GESSO.git
 cd GESSO
@@ -69,7 +75,11 @@ The [documentation](https://gesso-malab.readthedocs.io/) includes a runnable tut
 
 ## Citation
 
-Citation metadata are provided in [`CITATION.cff`](CITATION.cff) and will be updated with the article DOI after publication. Please cite the article and the specific GESSO software release used in your analysis.
+If you use GESSO, please cite the following article and the specific GESSO software release used in your analysis:
+
+Yang, A. J., Tan, C. & Ma, Y. Interpretable and scalable spatial gene set activity analysis with GESSO uncovers functional tissue architecture. *Nature Communications* (2026). https://doi.org/10.1038/s41467-026-78316-z
+
+Machine-readable citation metadata are provided in [`CITATION.cff`](CITATION.cff).
 
 ## License
 

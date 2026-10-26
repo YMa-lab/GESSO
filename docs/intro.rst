@@ -12,12 +12,12 @@ for each spatial spot in the dataset.
 Installation
 ------------
 Install GESSO into a new Python environment.
-Your environment should have Python 3.12, as well as pip and git installed.
+Your environment should have Python 3.12, 3.13, or 3.14, as well as pip and git installed.
 
 .. code-block:: bash
 
     git clone https://github.com/YMa-lab/GESSO.git
-    cd gesso
+    cd GESSO
     pip install .
     cd ..
 
@@ -65,4 +65,53 @@ Suppose your spatial transcriptomics dataset contains counts for :math:`G` genes
     )
     htest_df = htest_report.htest_df()  # returns N by 4 df w/ columns 'x', 'y', 'p', 'gas'
     htest_df.to_csv("htest_output.csv")
+
+Sparse expression data
+----------------------
+
+For sparse counts, create a zero-filled pandas sparse DataFrame to avoid a dense
+copy of the expression matrix. Normalization preserves sparse storage, and gene
+centering is applied implicitly during computation:
+
+.. code-block:: python
+
+    expression_df = pd.DataFrame.sparse.from_spmatrix(
+        sparse_counts, index=spot_ids, columns=gene_names
+    )
+
+Permutation memory and optional storage
+---------------------------------------
+
+Permutation tests process random gene sets in bounded batches and retain only
+per-spot exceedance counts by default. ``batch_size`` controls the maximum number
+of null score vectors collected at once; the default is twice the worker count.
+Changing it does not change the sampled gene sets or the p-value calculation.
+
+To retain null scores, provide a new output directory:
+
+.. code-block:: python
+
+    htest_report = model.htest_elevated_gas(
+        genes_in_geneset=["gene1", "gene2", "gene3"],
+        n_permutations=500,
+        n_jobs=4,
+        batch_size=8,
+        null_scores_dir="results/pathway_null_scores",
+    )
+    null_scores = htest_report.null_scores()  # read-only NumPy memory map
+    first_permutation = null_scores[0]
+
+``null_scores.npy`` has shape ``(n_permutations, n_spots)`` and float64 values.
+The directory also contains ``observed_scores.npy``, ``locations.json`` (spot
+labels and coordinates, readable with ``pd.read_json(..., orient="table")``),
+``sampled_genes.jsonl`` (one gene list per permutation, numbered from zero), and
+``metadata.json`` (parameters, score layout, and completion status).
+The score columns follow the stored location order. Existing directories are
+refused. Interrupted runs remain marked incomplete and cannot be opened through
+``null_scores()``; automatic resumption is not supported.
+
+Saving requires approximately ``8 * n_permutations * n_spots`` bytes for null
+scores, plus metadata. Without ``null_scores_dir``, no output files are created.
+The test retains the existing strict comparison and p-value definition:
+the fraction of null scores greater than the observed score at each spot.
 

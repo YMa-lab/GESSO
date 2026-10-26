@@ -36,11 +36,14 @@ class TestGESSOInit:
                 verbose=False,
             )
 
+    @pytest.mark.parametrize("dtype", [str, "string", "category", bool, "boolean"])
     def test_nonnumeric_locations_raises(
-        self, expression_df, locations_df, genesets_df
+        self, expression_df, locations_df, genesets_df, dtype
     ):
         bad_loc = locations_df.copy()
-        bad_loc["x"] = bad_loc["x"].astype(str)
+        bad_loc["x"] = bad_loc["x"].astype(bool if dtype == "boolean" else dtype)
+        if dtype == "boolean":
+            bad_loc["x"] = bad_loc["x"].astype(dtype)
         with pytest.raises(ValueError, match="numeric"):
             GESSO(
                 expression_df=expression_df,
@@ -48,6 +51,19 @@ class TestGESSOInit:
                 genesets_df=genesets_df,
                 verbose=False,
             )
+
+    @pytest.mark.parametrize("dtype", ["Int64", "Float64"])
+    def test_nullable_numeric_locations_match_numpy(
+        self, expression_df, locations_df, genesets_df, dtype
+    ):
+        options = dict(
+            expression_df=expression_df, genesets_df=genesets_df, verbose=False
+        )
+        expected = GESSO(locations_df=locations_df, **options).compute_gas(n_jobs=1)
+        actual = GESSO(locations_df=locations_df.astype(dtype), **options).compute_gas(
+            n_jobs=1
+        )
+        pd.testing.assert_frame_equal(actual.gas_df(), expected.gas_df())
 
     def test_nan_locations_raises(self, expression_df, locations_df, genesets_df):
         bad_loc = locations_df.copy()

@@ -60,17 +60,26 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = "sphinx_rtd_theme"
+html_theme = "pydata_sphinx_theme"
+html_title = "GESSO"
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-# html_static_path = ["_static"]
+html_static_path = ["_static"]
+html_css_files = ["css/custom.css"]
 
 
 html_theme_options = {
+    "logo": {"text": "GESSO"},
+    "navbar_center": [],
+    "navbar_end": ["theme-switcher", "navbar-icon-links"],
+    "github_url": "https://github.com/YMa-lab/GESSO",
     "navigation_depth": 4,
-    "collapse_navigation": False,
-    "sticky_navigation": True,
-    "includehidden": True,
+    "show_nav_level": 1,
+    "show_toc_level": 2,
+    "show_prev_next": True,
 }
+
+# Keep the complete documentation tree available on every page.
+html_sidebars = {"**": ["search-field", "gesso-sidebar.html"]}

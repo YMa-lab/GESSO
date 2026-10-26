@@ -8,10 +8,14 @@ import numpy as np
 from joblib import Parallel, delayed
 from typing import Literal
 import random
+from contextlib import nullcontext
+from pathlib import Path
 from .console import COMPUTE_LOGGER, GENESET_LOGGER, INIT_LOGGER
 from .interactive import GeneSetActivityScoresReport, PermutationTestReport
+from .permutation import _PermutationAccumulator, _NullScoreStore
 from .computation import (
-    bulk_standard_scale,
+    standardized_expression,
+    laplacian_spectral_scale,
     bulk_normalize,
     gLPCA_sparse,
     partition_kmeans_stratified,
@@ -20,6 +24,18 @@ from .computation import (
 
 _init_logger = logging.getLogger(INIT_LOGGER)
 _compute_logger = logging.getLogger(COMPUTE_LOGGER)
+
+
+def _expression_values(frame: pd.DataFrame):
+    """Extract a numerical matrix without densifying sparse DataFrames."""
+    is_sparse = [isinstance(dtype, pd.SparseDtype) for dtype in frame.dtypes]
+    if any(is_sparse):
+        if not all(is_sparse) or any(dtype.fill_value != 0 for dtype in frame.dtypes):
+            raise ValueError(
+                "Sparse expression DataFrames must use zero fill values in every column."
+            )
+        return frame.sparse.to_coo().tocsr()
+    return frame.to_numpy()
 
 
 class GESSO:
@@ -49,6 +65,12 @@ class GESSO:
             A DataFrame containing n_spots rows and n_genes columns.
             The index will be interpreted as the spot ID.
             The columns will be interpreted as gene names.
+
+            Zero-filled pandas sparse DataFrames are supported without dense
+            conversion. For SciPy sparse counts, use
+            ``pd.DataFrame.sparse.from_spmatrix(counts, index=spot_ids,
+            columns=gene_names)``. Sparse normalization and implicit centering
+            preserve sparsity during computation.
 
         locations_df : pd.DataFrame ~ (n_spots, 2)
             A DataFrame containing n_spots rows and 2 columns.
@@ -86,7 +108,15 @@ class GESSO:
             logger configuration.
         """
         # preprocess input data
-        self._expression_df = expression_df.T.copy()
+        if any(isinstance(dtype, pd.SparseDtype) for dtype in expression_df.dtypes):
+            # Avoid pandas' generic transpose path for sparse extension arrays.
+            self._expression_df = pd.DataFrame.sparse.from_spmatrix(
+                _expression_values(expression_df).T,
+                index=expression_df.columns,
+                columns=expression_df.index,
+            )
+        else:
+            self._expression_df = expression_df.T.copy()
         self._locations_df = locations_df.copy()
         if genesets_df is not None:
             self._genesets_df = genesets_df.copy()
@@ -104,22 +134,27 @@ class GESSO:
         self._verify_gene_match()
         self._laplacian = self._compute_laplacian_knn(k=k)
         self._k = k
+        self._laplacian_eigenvalue = None
+        # Only retain the most recent partition configuration to bound memory.
+        self._partition_cache = None
 
-        if normalize_counts_method == "normalize":
-            self._expression_df = pd.DataFrame(
-                bulk_normalize(self._expression_df.to_numpy(), log1p=False),
-                index=self._expression_df.index,
-                columns=self._expression_df.columns,
+        if normalize_counts_method in ("normalize", "normalize-log1p"):
+            values = bulk_normalize(
+                _expression_values(self._expression_df),
+                log1p=normalize_counts_method == "normalize-log1p",
             )
-            self._log_init("Normalized expression data with strategy 'normalize'.")
-        elif normalize_counts_method == "normalize-log1p":
-            self._expression_df = pd.DataFrame(
-                bulk_normalize(self._expression_df.to_numpy(), log1p=True),
+            constructor = (
+                pd.DataFrame.sparse.from_spmatrix
+                if sparse.issparse(values)
+                else pd.DataFrame
+            )
+            self._expression_df = constructor(
+                values,
                 index=self._expression_df.index,
                 columns=self._expression_df.columns,
             )
             self._log_init(
-                "Normalized expression data with strategy 'normalize-log1p'."
+                f"Normalized expression data with strategy '{normalize_counts_method}'."
             )
         elif normalize_counts_method != "none":
             raise ValueError("Invalid input for parameter 'normalize_counts'.")
@@ -133,6 +168,31 @@ class GESSO:
     def _log_compute(self, msg: str, level: int = logging.INFO) -> None:
         if self._verbose:
             _compute_logger.log(level, msg)
+
+    def _get_partition_graphs(self, method, n_partitions, seed):
+        """Reuse partitions, graphs and scales independently of the gene sets."""
+        key = (method, n_partitions, seed)
+        if self._partition_cache is not None and self._partition_cache[0] == key:
+            return self._partition_cache[1]
+        if method == "random":
+            partitioner = partition_naive
+        elif method == "stratified_kmeans":
+            partitioner = partition_kmeans_stratified
+        else:
+            raise ValueError(
+                f"Invalid input for parameter 'partition_method': {method}."
+            )
+        # Release the previous configuration before allocating its replacement.
+        self._partition_cache = None
+        partitions = partitioner(self._locations_df, k=n_partitions, seed=seed)
+        graphs = []
+        for index in partitions:
+            graph = self._compute_laplacian_knn(
+                k=self._k, locations_df=self._locations_df.loc[index]
+            )
+            graphs.append((index, graph, laplacian_spectral_scale(graph)))
+        self._partition_cache = (key, graphs)
+        return graphs
 
     def compute_gas(
         self,
@@ -252,6 +312,8 @@ class GESSO:
 
         call_verbose = self._verbose if verbose is None else verbose
         worker_log_level = logging.getLogger(GENESET_LOGGER).getEffectiveLevel()
+        # Workers capture the expression data, not the model and its graph caches.
+        expression_df = self._expression_df
 
         # begin computation
         if compute_method == "cpu":
@@ -264,6 +326,9 @@ class GESSO:
             geneset_to_gene_contributions_df_dict = dict()
 
             L = self._laplacian
+            if self._laplacian_eigenvalue is None:
+                self._laplacian_eigenvalue = laplacian_spectral_scale(L)
+            graph_scale = self._laplacian_eigenvalue
             method_f = gLPCA_sparse
 
             def process_geneset(
@@ -273,11 +338,13 @@ class GESSO:
                 genes_in_geneset = [
                     g for g in genes_in_geneset if g in expression_gene_set
                 ]
-                X: np.ndarray = self._expression_df.loc[genes_in_geneset].to_numpy()
-                X = bulk_standard_scale(X, axis=1)
+                X = standardized_expression(
+                    _expression_values(expression_df.loc[genes_in_geneset])
+                )
                 u, v, _, _ = method_f(
                     X=X,
                     L=L,
+                    laplacian_eigenvalue=graph_scale,
                     beta=beta,
                     geneset_name=geneset,
                     genes_in_geneset=genes_in_geneset,
@@ -329,19 +396,9 @@ class GESSO:
             if n_partitions is None:
                 n_partitions = max(int(len(self._locations_df) / 5000), 2)
 
-            if partition_method == "random":
-                partitioned_indices = partition_naive(
-                    df=self._locations_df, k=n_partitions, seed=partition_seed
-                )
-            elif partition_method == "stratified_kmeans":
-                partitioned_indices = partition_kmeans_stratified(
-                    df=self._locations_df, k=n_partitions, seed=partition_seed
-                )
-            else:
-                raise ValueError(
-                    f"Invalid input for parameter 'partition_method': "
-                    f"{partition_method}."
-                )
+            partition_graphs = self._get_partition_graphs(
+                partition_method, n_partitions, partition_seed
+            )
 
             method_f = gLPCA_sparse
 
@@ -352,17 +409,18 @@ class GESSO:
                 geneset_num: int,
                 subset_num: int,
                 job_num: int,
+                local_laplacian: sparse.csr_matrix,
+                graph_scale: float,
             ) -> tuple[str, np.ndarray, np.ndarray, pd.Index, int, int]:
-                X: np.ndarray = self._expression_df.loc[
-                    genes_in_geneset, subset_index
-                ].to_numpy()
-                local_laplacian = self._compute_laplacian_knn(
-                    k=self._k, locations_df=self._locations_df.loc[subset_index]
+                X = standardized_expression(
+                    _expression_values(
+                        expression_df.loc[genes_in_geneset, subset_index]
+                    )
                 )
-                X = bulk_standard_scale(X, axis=1)
                 u, v, _, _ = method_f(
                     X=X,
                     L=local_laplacian,
+                    laplacian_eigenvalue=graph_scale,
                     beta=beta,
                     geneset_name=geneset,
                     genes_in_geneset=genes_in_geneset,
@@ -394,7 +452,9 @@ class GESSO:
                 genes_in_geneset = [
                     g for g in genes_in_geneset if g in expression_gene_set
                 ]
-                for subset_num, subset_index in enumerate(partitioned_indices):
+                for subset_num, (subset_index, graph, scale) in enumerate(
+                    partition_graphs
+                ):
                     parallel_input_list.append(
                         (
                             geneset,
@@ -403,13 +463,14 @@ class GESSO:
                             geneset_num,
                             subset_num,
                             job_num,
+                            graph,
+                            scale,
                         )
                     )
                     job_num += 1
 
             results = Parallel(n_jobs=n_jobs)(
-                delayed(process_geneset)(arg0, arg1, arg2, arg3, arg4, arg5)
-                for arg0, arg1, arg2, arg3, arg4, arg5 in parallel_input_list
+                delayed(process_geneset)(*args) for args in parallel_input_list
             )
 
             geneset_to_reference_gene_idx = {}
@@ -500,6 +561,9 @@ class GESSO:
         n_permutations: int = 500,
         seed: int = 42,
         n_jobs: int = -1,
+        *,
+        batch_size: int | None = None,
+        null_scores_dir: str | os.PathLike | None = None,
     ) -> PermutationTestReport:
         """Conducts a permutation test at each spot to systematically identify
         spots with significantly elevated gene set activity.
@@ -531,6 +595,17 @@ class GESSO:
         n_jobs : int
             Default: -1. Number of parallel jobs to run. If -1, uses all available CPUs.
 
+        batch_size : int | None
+            Maximum number of null score vectors collected at once. Defaults to
+            twice the worker count. Smaller batches reduce memory use. Sampling
+            and p-values are independent of the batch size and worker count.
+
+        null_scores_dir : str | os.PathLike | None
+            Optional new output directory for null_scores.npy (permutations by
+            spots), observed_scores.npy, locations.json, sampled_genes.jsonl and
+            metadata.json. Existing directories are never overwritten. With
+            None, no files are written. Failed runs remain marked incomplete.
+
         Returns
         -------
         PermutationTestReport
@@ -538,11 +613,37 @@ class GESSO:
         """
         if geneset is None and genes_in_geneset is None:
             raise ValueError("Both 'geneset' and 'genes_in_geneset' cannot be None.")
+        if (
+            isinstance(n_permutations, bool)
+            or not isinstance(n_permutations, (int, np.integer))
+            or n_permutations < 1
+        ):
+            raise ValueError("n_permutations must be a positive integer.")
+        n_permutations = int(n_permutations)
+        if batch_size is not None and (
+            isinstance(batch_size, bool)
+            or not isinstance(batch_size, (int, np.integer))
+            or batch_size < 1
+        ):
+            raise ValueError("batch_size must be a positive integer.")
+        output_dir = (
+            None
+            if null_scores_dir is None
+            else Path(null_scores_dir).expanduser().resolve()
+        )
+        if output_dir is not None and output_dir.exists():
+            raise FileExistsError(
+                f"Null-score output directory already exists: {output_dir}"
+            )
 
         all_genes = sorted(self._expression_df.index.to_list())
 
         if geneset is not None:
             if genes_in_geneset is None:
+                if self._genesets_df is None:
+                    raise ValueError(
+                        "Gene sets DataFrame not provided. Supply genes_in_geneset."
+                    )
                 genes_in_geneset = self._genesets_df[
                     self._genesets_df[geneset] == 1
                 ].index.to_list()
@@ -557,42 +658,93 @@ class GESSO:
                     "If 'geneset' is None, 'genes_in_geneset' must be provided."
                 )
             geneset_name = "USER_DEFINED"
-        genesets_dict = {geneset_name: genes_in_geneset}
+        genes_in_geneset = list(genes_in_geneset)
+        if len(genes_in_geneset) > len(all_genes):
+            raise ValueError(
+                "The requested gene set is larger than the sampling universe."
+            )
+        rng = random.Random(seed)
+        workers = (os.cpu_count() or 1) if n_jobs == -1 else max(1, n_jobs)
+        workers = min(n_permutations, workers)
+        batch_size = int(batch_size) if batch_size is not None else 2 * workers
+        workers = min(workers, batch_size)
 
-        # initialize an rng
-        random.seed(seed)
-
-        null_geneset_names = []
-        for i in range(n_permutations):
-            null_genes = random.sample(all_genes, len(genes_in_geneset))
-            random_geneset_name = f"random_geneset_{i+1}"
-
-            genesets_dict[random_geneset_name] = null_genes
-            null_geneset_names.append(random_geneset_name)
-
-        activity_scores_df = self.compute_gas(
-            genesets_dict=genesets_dict, beta=beta, n_jobs=n_jobs
-        ).gas_df()
-
-        location_index = self._locations_df.index
-        # reindex by location index to ensure alignment
-        activity_scores_df = activity_scores_df.loc[location_index]
-
-        p_cap = activity_scores_df[geneset_name].to_numpy()
-        p_matrix = activity_scores_df[null_geneset_names].to_numpy().T
-        prob_greater = np.sum(p_matrix > p_cap, axis=0) / len(p_matrix)
-        p_vals = prob_greater
-        permutation_test_df = self._locations_df[["x", "y"]].join(
-            pd.DataFrame({"p": p_vals}, index=self._locations_df.index)
+        observed = (
+            self.compute_gas(
+                genesets_dict={geneset_name: genes_in_geneset},
+                beta=beta,
+                n_jobs=1,
+                store_gene_contributions=False,
+            )
+            .gas_df()[geneset_name]
+            .to_numpy()
         )
-        # since we already reindexed activity_scores_df by location_index,
-        # we can safely assign the geneset activity scores directly
-        permutation_test_df["gas"] = activity_scores_df[geneset_name].to_numpy()
-        # reorder columns to match expected output
-        permutation_test_df = permutation_test_df[["x", "y", "gas", "p"]]
+        accumulator = _PermutationAccumulator(observed)
+        expression_df = self._expression_df
+        L = self._laplacian
+        graph_scale = self._laplacian_eigenvalue
+        call_verbose = self._verbose
+        worker_log_level = logging.getLogger(GENESET_LOGGER).getEffectiveLevel()
+
+        def score_null(genes, permutation):
+            X = standardized_expression(_expression_values(expression_df.loc[genes]))
+            _, scores, _, _ = gLPCA_sparse(
+                X=X,
+                L=L,
+                laplacian_eigenvalue=graph_scale,
+                beta=beta,
+                geneset_name=f"random_geneset_{permutation + 1}",
+                genes_in_geneset=genes,
+                job_num=permutation + 2,
+                verbose=call_verbose,
+                worker_log_level=worker_log_level,
+            )
+            return scores
+
+        store_context = nullcontext(None)
+        if output_dir is not None:
+            store_context = _NullScoreStore(
+                output_dir,
+                observed,
+                self._locations_df,
+                {
+                    "geneset": geneset_name,
+                    "genes_in_geneset": genes_in_geneset,
+                    "gene_universe": all_genes,
+                    "beta": float(beta),
+                    "seed": seed,
+                    "n_permutations": n_permutations,
+                },
+            )
+        with store_context as store:
+            # Reuse workers, but bound submitted tasks and returned score vectors.
+            with Parallel(
+                n_jobs=workers, batch_size=1, pre_dispatch=workers
+            ) as parallel:
+                for start in range(0, n_permutations, batch_size):
+                    batch = [
+                        rng.sample(all_genes, len(genes_in_geneset))
+                        for _ in range(min(batch_size, n_permutations - start))
+                    ]
+                    results = parallel(
+                        delayed(score_null)(genes, start + i)
+                        for i, genes in enumerate(batch)
+                    )
+                    for genes, scores in zip(batch, results):
+                        accumulator.update(scores)
+                        if store is not None:
+                            store.append(scores, genes)
+                    if store is not None:
+                        store.checkpoint()
+                    del results
+
+        permutation_test_df = self._locations_df[["x", "y"]].copy()
+        permutation_test_df["gas"] = observed
+        permutation_test_df["p"] = accumulator.p_values()
         return PermutationTestReport(
             geneset=geneset_name,
             permutation_test_df=permutation_test_df,
+            null_scores_dir=output_dir,
         )
 
     def _compute_laplacian_knn(
@@ -759,7 +911,12 @@ class GESSO:
                 f"{', '.join(missing_columns)}"
             )
         for col in required_columns:
-            if not np.issubdtype(self._locations_df[col].dtype, np.number):
+            dtype = self._locations_df[col].dtype
+            # pandas 3 uses an extension dtype for strings, which NumPy's
+            # issubdtype cannot interpret. Keep rejecting boolean coordinates.
+            if not pd.api.types.is_numeric_dtype(dtype) or pd.api.types.is_bool_dtype(
+                dtype
+            ):
                 raise ValueError(
                     f"Column '{col}' in locations df must contain numeric data"
                 )

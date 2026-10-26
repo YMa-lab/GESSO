@@ -8,5 +8,5 @@ hypothesis test for identifying spots with significantly elevated
 gene set activity scores (GASs).
 
 .. autoclass:: gesso.PermutationTestReport
-    :members: htest_df, gas_df, pval_df, locations_df, plot_gas_spatial_map, plot_pval_spatial_map
+    :members: htest_df, gas_df, pval_df, locations_df, null_scores, plot_gas_spatial_map, plot_pval_spatial_map
 

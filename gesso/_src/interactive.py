@@ -3,6 +3,9 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.colors import Colormap
 import pandas as pd
+import numpy as np
+import json
+from pathlib import Path
 from typing import Literal, Any
 
 
@@ -161,6 +164,7 @@ class PermutationTestReport:
         self,
         geneset: str,
         permutation_test_df: pd.DataFrame,
+        null_scores_dir: str | Path | None = None,
     ):
         """Initializes the PermutationTestReport object.
 
@@ -172,9 +176,43 @@ class PermutationTestReport:
         permutation_test_df : pd.DataFrame
             DataFrame containing the results of the permutation test.
             Should have columns: 'x', 'y', 'gas', 'p'
+
+        null_scores_dir : str | Path | None
+            Directory containing optional saved null scores and run metadata.
         """
         self._geneset = geneset
         self._permutation_test_df = permutation_test_df
+        self.null_scores_dir = (
+            None if null_scores_dir is None else Path(null_scores_dir).resolve()
+        )
+
+    def null_scores(self) -> np.memmap:
+        """Open saved null scores as a read-only, disk-backed NumPy array.
+
+        Rows follow permutation order; columns follow the spot order recorded
+        in locations.json and the original report. Raises ValueError if disk
+        storage was not enabled or the run is incomplete. This does not load
+        the entire array into memory.
+        """
+        if self.null_scores_dir is None:
+            raise ValueError(
+                "Null scores were not saved. Set null_scores_dir when running the test."
+            )
+        with (self.null_scores_dir / "metadata.json").open(encoding="utf-8") as handle:
+            metadata = json.load(handle)
+        if (
+            not metadata["complete"]
+            or metadata["completed_permutations"] != metadata["n_permutations"]
+        ):
+            raise ValueError("The saved permutation run is incomplete.")
+        scores = np.load(
+            self.null_scores_dir / "null_scores.npy", mmap_mode="r", allow_pickle=False
+        )
+        if list(scores.shape) != metadata["score_shape"] or scores.dtype != np.dtype(
+            metadata["score_dtype"]
+        ):
+            raise ValueError("Saved null scores do not match the run metadata.")
+        return scores
 
     def plot_gas_spatial_map(
         self,

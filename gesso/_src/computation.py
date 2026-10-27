@@ -6,6 +6,7 @@ from typing import Literal
 import time
 import pandas as pd
 from sklearn.cluster import KMeans
+from sklearn.utils.sparsefuncs import mean_variance_axis
 from .console import GENESET_LOGGER, ensure_worker_handler
 
 _geneset_logger = logging.getLogger(GENESET_LOGGER)
@@ -17,51 +18,63 @@ def maybe_flip(u: np.ndarray, v: np.ndarray, flip: bool):
     return u, v
 
 
-def _eigsh_smallest_robust(A, k=1, v0=None):
-    """robust smallest-algebraic eigenpair via cascading fallbacks.
+def _bounded_dense_eigh(A):
+    """Only materialize tiny fallback problems, never a large spot matrix."""
+    if A.shape[0] > 256:
+        raise RuntimeError(
+            "Eigenvalue iteration failed; refusing a dense fallback for "
+            f"a {A.shape[0]}-spot matrix. Try smaller lowres partitions."
+        )
+    if isinstance(A, splinalg.LinearOperator):
+        dense = A @ np.eye(A.shape[0])
+    else:
+        dense = A.toarray() if sparse.issparse(A) else np.asarray(A)
+    return np.linalg.eigh(dense)
 
-    arpack 'SA' mode is often slow or non-convergent on laplacian-derived
-    matrices (eigenvalues clustered near 0). when it fails it raises an
-    arpack error that scipy's own formatter crashes on (TypeError: %d format),
-    which kills joblib's worker pool entirely. cascade through: SA -> SA with
-    larger ncv -> shift-invert near 0 -> dense eigh. always returns k smallest
-    eigenpairs; never raises.
+
+def _eigsh_smallest_robust(A, k=1, v0=None):
+    """Retry ARPACK with a larger basis and a bounded small-matrix fallback.
+
+    Operators skip shift-invert, which would introduce an iterative linear
+    solve inside every eigenvalue iteration.
     """
+    if A.shape[0] <= k:
+        vals, vecs = _bounded_dense_eigh(A)
+        return vals[:k], vecs[:, :k]
     # default SA
     try:
         return splinalg.eigsh(A, k=k, which="SA", v0=v0)
-    except Exception:
+    except (splinalg.ArpackError, TypeError):
         pass
     # SA with bigger lanczos basis
     try:
-        return splinalg.eigsh(A, k=k, which="SA", v0=v0, ncv=max(2 * k + 1, 50))
-    except Exception:
+        return splinalg.eigsh(
+            A, k=k, which="SA", v0=v0, ncv=min(A.shape[0], max(2 * k + 1, 50))
+        )
+    except (splinalg.ArpackError, TypeError):
         pass
     # shift-invert at small non-zero sigma (avoid 0 if matrix is singular)
-    try:
-        return splinalg.eigsh(A, k=k, sigma=1e-8, which="LM")
-    except Exception:
-        pass
+    if not isinstance(A, splinalg.LinearOperator) and A.shape[0] <= 256:
+        try:
+            return splinalg.eigsh(A, k=k, sigma=1e-8, which="LM", v0=v0)
+        except (splinalg.ArpackError, TypeError, RuntimeError):
+            pass
     # dense fallback
-    A_dense = A.toarray() if hasattr(A, "toarray") else np.asarray(A)
-    eigvals, eigvecs = np.linalg.eigh(A_dense)
+    eigvals, eigvecs = _bounded_dense_eigh(A)
     return eigvals[:k], eigvecs[:, :k]
 
 
 def _eigsh_largest_robust(A, k=1, return_eigenvectors=True, v0=None):
-    """robust largest-algebraic eigenpair via cascading fallbacks.
-
-    arpack 'LA' mode is normally well-behaved but can also fail when the
-    input matrix is rank-deficient in a sparse partition (e.g. very few
-    genes in a small geneset and/or a small spot subset). same crash mode
-    in scipy's error formatter; same cascade structure as the smallest helper.
-    """
+    """Retry the largest eigenpair with a bounded small-matrix fallback."""
+    if A.shape[0] <= k:
+        vals, vecs = _bounded_dense_eigh(A)
+        return (vals[-k:], vecs[:, -k:]) if return_eigenvectors else vals[-k:]
     # default LA
     try:
         return splinalg.eigsh(
             A, k=k, which="LA", v0=v0, return_eigenvectors=return_eigenvectors
         )
-    except Exception:
+    except (splinalg.ArpackError, TypeError):
         pass
     # LA with bigger lanczos basis
     try:
@@ -71,13 +84,12 @@ def _eigsh_largest_robust(A, k=1, return_eigenvectors=True, v0=None):
             which="LA",
             v0=v0,
             return_eigenvectors=return_eigenvectors,
-            ncv=max(2 * k + 1, 50),
+            ncv=min(A.shape[0], max(2 * k + 1, 50)),
         )
-    except Exception:
+    except (splinalg.ArpackError, TypeError):
         pass
     # dense fallback
-    A_dense = A.toarray() if hasattr(A, "toarray") else np.asarray(A)
-    eigvals, eigvecs = np.linalg.eigh(A_dense)
+    eigvals, eigvecs = _bounded_dense_eigh(A)
     if return_eigenvectors:
         return eigvals[-k:], eigvecs[:, -k:]
     return eigvals[-k:]
@@ -118,7 +130,7 @@ def align_gene_contribution_sign(
 def align_gene_contribution_sign_sparse(
     u_optimal: np.ndarray,
     v_optimal: np.ndarray,
-    X: sparse.csr_matrix,
+    X: np.ndarray | sparse.csr_matrix | splinalg.LinearOperator,
     method: str = "sign_max_abs",
 ):
     if method == "none":
@@ -142,7 +154,10 @@ def align_gene_contribution_sign_sparse(
         neg = np.sum(covs < 0)
         return flip_if(neg > pos)
     if method == "sign_overall_expression_proxy":
-        proxy = X.mean(axis=0)
+        if isinstance(X, splinalg.LinearOperator):
+            proxy = X.rmatvec(np.full(X.shape[0], 1.0 / X.shape[0]))
+        else:
+            proxy = X.mean(axis=0)
         proxy = np.asarray(proxy).ravel()
         corr = np.corrcoef(v_optimal, proxy)[0, 1]
         return flip_if(np.sign(corr) < 0 or np.isnan(corr))
@@ -186,15 +201,15 @@ def bulk_standard_scale(
 
 
 def bulk_normalize(
-    x: np.ndarray,
+    x: np.ndarray | sparse.csr_matrix,
     log1p: bool = False,
     rescale_strategy: Literal["median", "mean"] = "median",
-) -> np.ndarray:
+) -> np.ndarray | sparse.csr_matrix:
     """Bulk normalization of counts per observation down the columns (observations).
 
     Parameters
     ----------
-    x : np.ndarray
+    x : np.ndarray | sparse.csr_matrix
         Arbitrary 2D matrix. In the context of GESSO, this is the gene
         expression matrix. The columns are the observations and the rows are the
         genes.
@@ -204,24 +219,87 @@ def bulk_normalize(
 
     Returns
     -------
-    np.ndarray
-        Count-normalized 2D matrix.
+    np.ndarray | sparse.csr_matrix
+        Count-normalized matrix, preserving sparse storage. Zero-total spots
+        remain zero. The input is not modified.
     """
-    total_counts = np.sum(x, axis=0)
-    x = x / total_counts
+    total_counts = np.asarray(x.sum(axis=0)).ravel()
     if rescale_strategy == "mean":
-        x = x * np.mean(total_counts)
+        target = np.mean(total_counts)
     elif rescale_strategy == "median":
-        x = x * np.median(total_counts)
+        target = np.median(total_counts)
     else:
         raise ValueError("Invalid rescale strategy.")
-    if log1p:
-        return np.log1p(x)
-    return x
+    # Empty spots stay zero in both representations.
+    nonzero = total_counts != 0
+    if sparse.issparse(x):
+        result = x.astype(np.float64, copy=True).tocsr()
+        result.sum_duplicates()
+        factors = np.divide(
+            1.0,
+            total_counts,
+            out=np.zeros_like(total_counts, dtype=float),
+            where=nonzero,
+        )
+        result.data *= factors[result.indices]
+        result.data *= target
+        if log1p:
+            np.log1p(result.data, out=result.data)
+        result.eliminate_zeros()
+    else:
+        result = np.array(x, dtype=np.float64, copy=True)
+        np.divide(result, total_counts, out=result, where=nonzero)
+        result[:, ~nonzero] = 0
+        result *= target
+        if log1p:
+            np.log1p(result, out=result)
+    return result
+
+
+def standardized_expression(X):
+    """Center/scale genes without filling the implicit zeros of sparse input.
+
+    Represent Z = D X - (D mean) 1.T by its forward and transpose products.
+    Dense input keeps the existing explicit scaling path.
+    """
+    if not sparse.issparse(X):
+        return bulk_standard_scale(X, axis=1)
+    X = sparse.csr_matrix(X, dtype=np.float64)
+    means, variances = mean_variance_axis(X, axis=1)
+    std = np.sqrt(np.maximum(variances, 0))
+    if not np.any(std > 0):
+        raise ValueError("Gene set expression has no nonzero variation.")
+    inv_std = np.divide(1.0, std, out=np.zeros_like(std), where=std > 0)
+    scaled = X.multiply(inv_std[:, None]).tocsr()
+    scaled.eliminate_zeros()
+    offset = means * inv_std
+
+    def matvec(v):
+        v = np.asarray(v).reshape(-1)
+        return scaled @ v - offset * v.sum()
+
+    def rmatvec(u):
+        u = np.asarray(u).reshape(-1)
+        return scaled.T @ u - offset @ u
+
+    return splinalg.LinearOperator(
+        X.shape, matvec=matvec, rmatvec=rmatvec, dtype=np.float64
+    )
+
+
+def laplacian_spectral_scale(L):
+    """Compute the graph-only scale with the original deterministic start."""
+    rng = np.random.default_rng(42)
+    rng.standard_normal(L.shape[0])  # The original first draw belongs to X.T X.
+    return float(
+        _eigsh_largest_robust(
+            L, k=1, return_eigenvectors=False, v0=rng.standard_normal(L.shape[0])
+        )[0]
+    )
 
 
 def gLPCA_sparse(
-    X: np.ndarray | sparse.csr_matrix,
+    X: np.ndarray | sparse.csr_matrix | splinalg.LinearOperator,
     L: sparse.csr_matrix,
     geneset_name: str,
     genes_in_geneset: list,
@@ -236,16 +314,17 @@ def gLPCA_sparse(
     ] = "sign_overall_expression_proxy",
     verbose: bool = True,
     worker_log_level: int = logging.INFO,
+    laplacian_eigenvalue: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, str, list[str]]:
     """This method implements Theorem 3.1 of the paper Graph-Laplacian PCA:
     Closed-form Solution and Robustness by Bo Jiang, Chris Ding, Bin Luo, and Jin Tang.
 
-    The sparse method is faster but less numerically precise compared to the
-    non-sparse method.
+    Applies the spot-by-spot objective as a LinearOperator without constructing
+    the Gram matrix. X may also be an implicitly centered/scaled operator.
 
     Parameters
     ----------
-    X : np.ndarray | sparse.csr_matrix ~ (n_genes, n_obs)
+    X : np.ndarray | sparse.csr_matrix | LinearOperator ~ (n_genes, n_obs)
         Gene expression matrix.
 
     L : sparse.csr_matrix ~ (n_obs, n_obs)
@@ -294,6 +373,9 @@ def gLPCA_sparse(
         logger config, so this is replicated here to honor levels set via
         ``gesso.logging.set_level`` / ``silence_per_geneset`` in the parent.
 
+    laplacian_eigenvalue : float | None
+        Optional cached largest eigenvalue of L, shared across gene sets.
+
     Returns
     -------
     np.ndarray ~ (n_genes)
@@ -316,10 +398,10 @@ def gLPCA_sparse(
         if verbose:
             _geneset_logger.log(level, msg)
 
-    if isinstance(X, np.ndarray):
-        X = sparse.csr_matrix(X)
-    elif not isinstance(X, sparse.csr_matrix):
-        raise ValueError("X must be a numpy array or a sparse csr matrix.")
+    if not isinstance(X, (np.ndarray, sparse.csr_matrix, splinalg.LinearOperator)):
+        raise ValueError(
+            "X must be a numpy array, sparse csr matrix, or LinearOperator."
+        )
 
     if isinstance(L, np.ndarray):
         L = sparse.csr_matrix(L)
@@ -328,8 +410,14 @@ def gLPCA_sparse(
 
     start = time.time()
     n = X.shape[1]
-    G = X.T @ X
-    _log(f"(Job {job_num}: {geneset_name}) Computed gram matrix", logging.DEBUG)
+    if X.shape[0] == 0 or n < 2:
+        raise ValueError("GESSO requires at least one gene and two spots.")
+    if (isinstance(X, np.ndarray) and not np.any(X)) or (
+        sparse.issparse(X) and X.count_nonzero() == 0
+    ):
+        raise ValueError("Gene set expression has no nonzero variation.")
+    X_op = splinalg.aslinearoperator(X)
+    G = X_op.T @ X_op
 
     # initialize an rng
     rng = np.random.default_rng(42)
@@ -339,15 +427,25 @@ def gLPCA_sparse(
     )[0]
     _log(f"(Job {job_num}: {geneset_name}) Computed lmbda", logging.DEBUG)
 
-    ident = sparse.eye(n)
-    psd_temp = ident - G / lmbda
-
-    xi = _eigsh_largest_robust(
-        L, k=1, return_eigenvectors=False, v0=rng.standard_normal(n)
-    )[0]
+    if not np.isfinite(lmbda) or lmbda <= 0:
+        raise ValueError("Gene set expression has no nonzero variation.")
+    graph_v0 = rng.standard_normal(n)
+    xi = laplacian_eigenvalue
+    if xi is None:
+        xi = _eigsh_largest_robust(L, k=1, return_eigenvectors=False, v0=graph_v0)[0]
+    if not np.isfinite(xi) or xi <= 0:
+        raise ValueError("Laplacian must have a positive finite spectral scale.")
     _log(f"(Job {job_num}: {geneset_name}) Computed xi", logging.DEBUG)
 
-    G_beta = (1 - beta) * psd_temp + beta * (L / xi + ident / n)
+    identity_scale = 1 - beta + beta / n
+
+    def objective_matvec(v):
+        v = np.asarray(v).reshape(-1)
+        return (
+            identity_scale * v - ((1 - beta) / lmbda) * (G @ v) + (beta / xi) * (L @ v)
+        )
+
+    G_beta = splinalg.LinearOperator((n, n), matvec=objective_matvec, dtype=np.float64)
 
     eigenvalue, eigenvector = _eigsh_smallest_robust(
         G_beta, k=1, v0=rng.standard_normal(n)
@@ -361,6 +459,10 @@ def gLPCA_sparse(
 
     # scale the gene contribution vector to have unit norm
     scaling_factor = np.linalg.norm(u_optimal)
+    if not np.isfinite(scaling_factor) or scaling_factor == 0:
+        raise ValueError(
+            "The activity component has zero or nonfinite expression loading."
+        )
     u_optimal = u_optimal / scaling_factor
     v_optimal = v_optimal * scaling_factor
 

@@ -7,14 +7,16 @@ covering the objective, parameter choices, and interpretation of scores and test
 
 ## Setup
 
-Install GESSO from the repository root:
+Install GESSO with AnnData support from PyPI:
 
 ```bash
-pip install '.[anndata]'
+pip install 'gesso-py[anndata]'
 ```
 
 Install the `gesso-analysis` folder through your agent's skill installer, or point
 the agent directly to `gesso_vibe/gesso-analysis/SKILL.md`.
+The skill files and bundled demo data are available in the
+[repository](https://github.com/YMa-lab/GESSO).
 
 Example request:
 

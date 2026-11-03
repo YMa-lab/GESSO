@@ -7,8 +7,10 @@ description: Run and interpret GESSO spatial gene set activity analysis on AnnDa
 
 Use GESSO's Python API for the requested analysis. Locate the user's data and
 GESSO installation; the skill directory is not necessarily the repository root.
-Install `.[anndata]` from a GESSO checkout for AnnData input, or `.[tutorial]`
-when Scanpy/Squidpy plots are needed. Python 3.12–3.14 is supported.
+Install `gesso-py[anndata]` from PyPI for AnnData input, or `gesso-py[tutorial]`
+when Scanpy/Squidpy plots are needed. The Python import is `gesso`.
+Python 3.12–3.14 is supported. Download or clone the repository for the bundled
+example data; it is not included in the installed package.
 
 ## What GESSO models
 

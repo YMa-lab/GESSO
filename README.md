@@ -5,16 +5,13 @@ estimating spatially coherent gene set activity from spatial transcriptomics dat
 
 This repository is the official Python implementation of GESSO. Please visit the [GESSO documentation](https://gesso-malab.readthedocs.io/) for tutorials and API details.
 
-Current version: **0.2.0**. See the [changelog](https://github.com/YMa-lab/GESSO/blob/main/CHANGELOG.rst) for changes since 0.1.0.
-
 ![GESSO workflow showing spatial gene set activity estimation, local activity enrichment testing, and downstream biological analyses.](https://raw.githubusercontent.com/YMa-lab/GESSO/main/docs/_static/fig1_ncomm.png)
 
 *Figure 1. Overview of the GESSO workflow and applications. From the [GESSO paper in Nature Communications](https://doi.org/10.1038/s41467-026-78316-z).*
 
 ## Installation
 The PyPI distribution name is `gesso-py`; the Python import remains
-`from gesso import GESSO`. Until the first PyPI release is published, install
-from source as shown below.
+`from gesso import GESSO`.
 
 We recommend installing GESSO in a new Python environment. You can create a new Python environment through [conda](https://www.anaconda.com/docs/getting-started/miniconda/main):
 ```bash
@@ -23,20 +20,16 @@ conda activate gesso
 ```
 
 GESSO supports Python 3.12, 3.13, and 3.14. The example above uses 3.12; you can
-substitute either of the other supported versions. The following script installs
-GESSO into your Python environment:
+substitute either of the other supported versions. Install GESSO from PyPI:
 ```bash
-git clone https://github.com/YMa-Lab/GESSO.git
-cd GESSO
-pip install .
-cd ..
+pip install gesso-py
 ```
 
 ## Quick start
 
 For Scanpy/Squidpy workflows, install optional AnnData support with
-`pip install '.[anndata]'` from the repository, or install the plotting tutorial
-dependencies with `pip install '.[tutorial]'`. GESSO itself requires neither
+`pip install 'gesso-py[anndata]'`, or install the plotting tutorial
+dependencies with `pip install 'gesso-py[tutorial]'`. GESSO itself requires neither
 Scanpy nor Squidpy. Use `GESSO.from_anndata(adata, layer="counts")` to preserve
 sparse expression and `report.write_to_anndata(adata)` to attach pathway scores.
 See the [AnnData tutorial](https://gesso-malab.readthedocs.io/en/latest/anndata_tutorial.html)
@@ -87,6 +80,9 @@ htest_df.to_csv("htest_output.csv")
 ## Tutorials
 
 The [documentation](https://gesso-malab.readthedocs.io/) includes a runnable tutorial using the small dataset bundled in `demo_data`, as well as demonstrations for several spatial transcriptomics platforms. The platform-scale demonstrations require the corresponding public datasets described in each notebook.
+
+Download or clone the [repository](https://github.com/YMa-lab/GESSO) for the
+notebooks and bundled demo data; these are not included in the installed package.
 
 ## AI-assisted analysis
 

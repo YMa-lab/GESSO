@@ -69,6 +69,10 @@ Suppose your spatial transcriptomics dataset contains counts for :math:`G` genes
 Sparse expression data
 ----------------------
 
+For an existing AnnData object, use :meth:`GESSO.from_anndata`. See the
+:doc:`10x Visium BRCA Dataset with AnnData <anndata_tutorial>` for sparse input,
+result export, and plotting.
+
 For sparse counts, create a zero-filled pandas sparse DataFrame to avoid a dense
 copy of the expression matrix. Normalization preserves sparse storage, and gene
 centering is applied implicitly during computation:

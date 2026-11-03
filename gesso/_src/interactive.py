@@ -17,6 +17,7 @@ class GeneSetActivityScoresReport:
         gas_df: pd.DataFrame,
         locations_df: pd.DataFrame,
         geneset_to_gene_contributions_df_dict: dict,
+        metadata: dict | None = None,
     ) -> None:
         """Initializes the GeneSetActivityScoresReport object.
 
@@ -30,6 +31,9 @@ class GeneSetActivityScoresReport:
 
         geneset_to_gene_contributions_df_dict: dict
             Dictionary of geneset to gene contribution DataFrames.
+
+        metadata : dict | None
+            Optional computation settings included in AnnData exports.
         """
         self._gas_df = gas_df
         self._location_df = locations_df
@@ -38,6 +42,52 @@ class GeneSetActivityScoresReport:
             geneset_to_gene_contributions_df_dict
         )
         self._n_examples, self._n_genesets = gas_df.shape
+        self._metadata = {} if metadata is None else metadata.copy()
+
+    def write_to_anndata(
+        self,
+        adata,
+        *,
+        key: str = "gesso",
+        obs_columns: list[str] | None = None,
+        overwrite: bool = False,
+    ) -> None:
+        """Write pathway scores and settings into an existing AnnData in place.
+
+        Requires the optional ``anndata`` extra. Scores are aligned by cell ID,
+        not row position. Expression, spatial coordinates, and unrelated
+        annotations are preserved. Gene contributions remain in this report.
+
+        Parameters
+        ----------
+        adata : anndata.AnnData
+            In-memory, non-view target containing exactly the report's cell IDs,
+            in any order. Subset it explicitly if the report covers fewer cells.
+        key : str
+            Store a cell-by-pathway DataFrame in ``adata.obsm[key]`` and
+            computation settings and pathway names in ``adata.uns[key]``.
+        obs_columns : list[str] | None
+            Also copy these pathways into ``adata.obs`` as ``key:pathway``
+            columns, for Scanpy or Squidpy plotting. Default: none.
+        overwrite : bool
+            Allow replacing the selected obsm/uns keys and obs columns.
+            Default False protects existing results; other obs columns remain.
+
+        Returns
+        -------
+        None
+            Updates the supplied AnnData without copying its expression matrix.
+        """
+        from .anndata_io import write_scores
+
+        write_scores(
+            adata,
+            self.gas_df(),
+            self._metadata,
+            key=key,
+            obs_columns=obs_columns,
+            overwrite=overwrite,
+        )
 
     def gene_contributions_df(
         self,

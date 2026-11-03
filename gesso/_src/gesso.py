@@ -43,6 +43,71 @@ class GESSO:
     is a model for spatially informed gene set activity analysis.
     """
 
+    @classmethod
+    def from_anndata(
+        cls,
+        adata,
+        *,
+        layer: str | None = None,
+        spatial_key: str = "spatial",
+        genesets_df: pd.DataFrame | None = None,
+        k: int = 6,
+        normalize_counts_method: Literal[
+            "normalize", "normalize-log1p", "none"
+        ] = "none",
+        verbose: bool = True,
+    ):
+        """Construct a model from an in-memory AnnData without densifying counts.
+
+        Requires the optional ``anndata`` extra. The input is not modified.
+        Cell IDs come from ``obs_names`` and gene IDs from ``var_names``;
+        both must be unique. Gene IDs must match the supplied gene sets.
+
+        Parameters
+        ----------
+        adata : anndata.AnnData
+            In-memory data with dense NumPy or sparse SciPy expression.
+            Backed and lazy expression arrays are not supported.
+        layer : str | None
+            Expression layer to use; None selects ``adata.X``. There is no
+            automatic fallback to ``adata.raw`` or a counts layer.
+        spatial_key : str
+            Key in ``adata.obsm`` containing finite (n_obs, 2) x/y coordinates.
+            Run separate tissue sections separately to avoid cross-section edges.
+        genesets_df : pd.DataFrame | None
+            Optional gene-by-pathway membership table, as in the main constructor.
+        k : int
+            Number of spatial neighbors, as in the main constructor.
+        normalize_counts_method : {"none", "normalize", "normalize-log1p"}
+            Default "none". Select "normalize-log1p" for raw counts, or
+            "none" for data that has already been normalized and log transformed.
+        verbose : bool
+            Whether to emit GESSO logs.
+
+        Returns
+        -------
+        GESSO
+            A model using the existing GESSO computation methods.
+        """
+        from .anndata_io import expression_and_locations
+
+        expression, locations = expression_and_locations(
+            adata, layer=layer, spatial_key=spatial_key
+        )
+        model = cls(
+            expression,
+            locations,
+            genesets_df=genesets_df,
+            k=k,
+            normalize_counts_method=normalize_counts_method,
+            verbose=verbose,
+        )
+        model._input_metadata = {
+            "expression_source": "X" if layer is None else f"layers/{layer}",
+            "spatial_key": spatial_key,
+        }
+        return model
+
     def __init__(
         self,
         expression_df: pd.DataFrame,
@@ -134,6 +199,8 @@ class GESSO:
         self._verify_gene_match()
         self._laplacian = self._compute_laplacian_knn(k=k)
         self._k = k
+        self._input_metadata = {}
+        self._normalize_counts_method = normalize_counts_method
         self._laplacian_eigenvalue = None
         # Only retain the most recent partition configuration to bound memory.
         self._partition_cache = None
@@ -383,6 +450,13 @@ class GESSO:
                 gas_df=gas_df.transpose(),
                 locations_df=self._locations_df,
                 geneset_to_gene_contributions_df_dict=geneset_to_gene_contributions_df_dict,
+                metadata={
+                    **self._input_metadata,
+                    "k": self._k,
+                    "normalize_counts_method": self._normalize_counts_method,
+                    "beta": beta,
+                    "compute_method": compute_method,
+                },
             )
 
         elif compute_method == "lowres":
@@ -548,6 +622,16 @@ class GESSO:
                 gas_df=gas_df.transpose(),
                 locations_df=self._locations_df,
                 geneset_to_gene_contributions_df_dict=geneset_to_gene_contributions_df_dict,
+                metadata={
+                    **self._input_metadata,
+                    "k": self._k,
+                    "normalize_counts_method": self._normalize_counts_method,
+                    "beta": beta,
+                    "compute_method": compute_method,
+                    "n_partitions": n_partitions,
+                    "partition_method": partition_method,
+                    "partition_seed": partition_seed,
+                },
             )
 
         else:

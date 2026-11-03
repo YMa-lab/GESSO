@@ -25,6 +25,11 @@ and GESSO versions. Please discuss major changes in an issue before starting wor
    python -m pytest
    ```
 
+   For AnnData changes, install `'.[test,anndata]'` to include the integration
+   tests. Install `'.[test,tutorial]'` to also run the documented Scanpy/Squidpy
+   workflow on the bundled real Visium BRCA data. Optional tests are skipped
+   when their dependencies are absent.
+
 5. Open a pull request describing what changed, why, and how you tested it.
    Mention any changes to numerical results or algorithm behavior.
 
@@ -40,3 +45,8 @@ Add an upper bound only for a known incompatibility.
 For a reproducible analysis, record the exact versions in your own environment
 (for example, with `python -m pip freeze > requirements-analysis.txt`). The
 documentation build tools are pinned separately in `docs/requirements.txt`.
+
+## Releases
+
+Maintainers can use the manual **Publish to PyPI** workflow in GitHub Actions
+to validate and publish `gesso-py`.

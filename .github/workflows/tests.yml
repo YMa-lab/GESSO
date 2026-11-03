@@ -6,6 +6,7 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   pytest:
@@ -34,10 +35,27 @@ jobs:
 
       - name: Install package and test dependencies
         run: |
-          uv pip install --system --resolution ${{ matrix.resolution }} -r pyproject.toml --extra test
+          uv pip install --system --resolution ${{ matrix.resolution }} -r pyproject.toml --extra test --extra anndata
           uv pip install --system --no-deps .
           uv pip check --system
           uv pip freeze --system
 
       - name: Run tests
         run: python -m pytest -ra
+
+  tutorial:
+    runs-on: ubuntu-latest
+    env:
+      MPLBACKEND: Agg
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+      - name: Install tutorial dependencies
+        run: uv pip install --system '.[test,tutorial]'
+      - name: Run documented workflow
+        run: python -m pytest tests/test_anndata_tutorial.py -ra

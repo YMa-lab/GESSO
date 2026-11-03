@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use GESSO, please cite the accompanying article and this software release."
-title: "GESSO: spatial gene set activity analysis"
+title: "GESSO: Spatial Gene Set Activity Analysis"
 type: software
 authors:
   - family-names: Yang
@@ -9,7 +9,7 @@ authors:
     given-names: Chichun
   - family-names: Ma
     given-names: Ying
-version: 0.1.0
+version: 0.2.0
 repository-code: "https://github.com/YMa-Lab/GESSO"
 url: "https://gesso-malab.readthedocs.io/"
 license: MIT

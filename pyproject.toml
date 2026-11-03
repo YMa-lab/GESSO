@@ -1,11 +1,11 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 
 [project]
-name = "gesso"
-version = "0.1.0"
+name = "gesso-py"
+version = "0.2.0"
 description = "GESSO: spatially informed gene set activity analysis"
 authors = [
     {name = "Andrew Yang", email = "andrew_j_yang@brown.edu"},
@@ -22,7 +22,8 @@ dependencies = [
     "matplotlib>=3.10.6",
     "joblib>=1.5.3"
 ]
-license = {file = "LICENSE"}
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["transcriptomics", "spatial", "pathway", "biostatistics", "statistics"]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -32,6 +33,17 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+anndata = [
+    "anndata>=0.12.3"
+]
+tutorial = [
+    "anndata>=0.12.3",
+    "scanpy>=1.12",
+    "squidpy>=1.8",
+    "ipykernel>=6.30",
+    "ipywidgets>=8.1.7",
+    "nbclient>=0.10.2"
+]
 test = [
     "pytest>=8.4.2"
 ]
@@ -40,8 +52,14 @@ test = [
 [project.urls]
 Homepage = "https://github.com/YMa-Lab/GESSO"
 Documentation = "https://gesso-malab.readthedocs.io/"
+Source = "https://github.com/YMa-lab/GESSO"
+Issues = "https://github.com/YMa-lab/GESSO/issues"
+Changelog = "https://gesso-malab.readthedocs.io/en/latest/changelog.html"
 
 
+
+[tool.hatch.build.targets.wheel]
+packages = ["gesso"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

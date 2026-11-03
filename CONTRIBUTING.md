@@ -45,8 +45,3 @@ Add an upper bound only for a known incompatibility.
 For a reproducible analysis, record the exact versions in your own environment
 (for example, with `python -m pip freeze > requirements-analysis.txt`). The
 documentation build tools are pinned separately in `docs/requirements.txt`.
-
-## Releases
-
-Maintainers can use the manual **Publish to PyPI** workflow in GitHub Actions
-to validate and publish `gesso-py`.

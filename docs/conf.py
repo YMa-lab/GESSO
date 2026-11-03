@@ -40,7 +40,11 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.extlinks",
     "nbsphinx",
+    "myst_parser",
 ]
+
+# Share Markdown math syntax with the changelog rendered on GitHub.
+myst_enable_extensions = ["dollarmath"]
 
 # never re-execute demo notebooks at build time; they rely on large datasets
 # not available on the build server, so we render their stored outputs as-is.

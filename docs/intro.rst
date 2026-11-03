@@ -12,14 +12,18 @@ for each spatial spot in the dataset.
 Installation
 ------------
 Install GESSO into a new Python environment.
-Your environment should have Python 3.12, 3.13, or 3.14, as well as pip and git installed.
+Use Python 3.12, 3.13, or 3.14 and install from PyPI:
 
 .. code-block:: bash
 
-    git clone https://github.com/YMa-lab/GESSO.git
-    cd GESSO
-    pip install .
-    cd ..
+    pip install gesso-py
+
+The distribution name is ``gesso-py``; import it with ``from gesso import GESSO``.
+For AnnData support, install ``'gesso-py[anndata]'``. For the Scanpy/Squidpy
+tutorial, install ``'gesso-py[tutorial]'`` instead.
+
+Download or clone the `repository <https://github.com/YMa-lab/GESSO>`_ for the
+notebooks and bundled demo data, which are not included in the installed package.
 
 
 Quick Start
